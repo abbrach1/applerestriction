@@ -158,6 +158,85 @@ function loadDeviceSettings(id, deviceData) {
   }
 }
 
+// ─── Add Device Modal ────────────────────────────────────────────────────────
+let pairWatchUnsubscribe = null;
+
+document.getElementById("add-device-btn").addEventListener("click", () => {
+  document.getElementById("modal-overlay").classList.remove("hidden");
+  document.getElementById("modal-step-1").classList.remove("hidden");
+  document.getElementById("modal-step-2").classList.add("hidden");
+  document.getElementById("new-device-label").value = "";
+  document.getElementById("paired-success").classList.add("hidden");
+  document.getElementById("waiting-indicator").classList.remove("hidden");
+});
+
+window.closeAddDeviceModal = function () {
+  document.getElementById("modal-overlay").classList.add("hidden");
+  if (pairWatchUnsubscribe) { pairWatchUnsubscribe(); pairWatchUnsubscribe = null; }
+};
+
+window.closeModal = function (event) {
+  if (event.target === document.getElementById("modal-overlay")) {
+    closeAddDeviceModal();
+  }
+};
+
+window.generateAdminPairCode = async function () {
+  const label = document.getElementById("new-device-label").value.trim();
+  if (!label) {
+    document.getElementById("new-device-label").focus();
+    return;
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  document.getElementById("pairing-code-text").textContent = code;
+
+  // Store the pending pairing entry in Firebase so the iOS app can find it
+  await set(ref(db, `pairing/${code}`), {
+    adminLabel: label,
+    createdAt:  new Date().toISOString(),
+    pending:    true,
+  });
+
+  // Switch to step 2
+  document.getElementById("modal-step-1").classList.add("hidden");
+  document.getElementById("modal-step-2").classList.remove("hidden");
+
+  // Watch for the iOS app to register under this code
+  watchForPairing(code);
+
+  // Auto-expire code after 10 minutes
+  setTimeout(async () => {
+    const snap = await get(ref(db, `pairing/${code}`));
+    if (snap.exists() && snap.val().pending) {
+      await remove(ref(db, `pairing/${code}`));
+    }
+  }, 10 * 60 * 1000);
+};
+
+function watchForPairing(code) {
+  if (pairWatchUnsubscribe) pairWatchUnsubscribe();
+
+  const pairRef = ref(db, `pairing/${code}`);
+  pairWatchUnsubscribe = onValue(pairRef, async (snap) => {
+    const data = snap.val();
+    if (!data) return;
+
+    // iOS app fills in device info; once 'pending' is gone or device info appears
+    if (data.id || data.name) {
+      // Device registered — mark as paired
+      document.getElementById("waiting-indicator").classList.add("hidden");
+      document.getElementById("paired-success").classList.remove("hidden");
+      showToast("✅ Device connected!");
+
+      // Clean up pairing entry
+      await remove(pairRef);
+
+      if (pairWatchUnsubscribe) { pairWatchUnsubscribe(); pairWatchUnsubscribe = null; }
+    }
+  });
+}
+
 // ─── Tag Grids ───────────────────────────────────────────────────────────────
 function buildTagGrids() {
   const catGrid = document.getElementById("category-grid");

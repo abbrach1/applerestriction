@@ -26,7 +26,8 @@
       </div>
 
       <div class="sidebar-footer">
-        <button class="btn-icon" id="refresh-btn" title="Refresh">↺ Refresh</button>
+        <button class="btn-icon" id="add-device-btn">＋ Add Device</button>
+        <button class="btn-icon" id="refresh-btn" style="margin-top:6px">↺ Refresh</button>
       </div>
     </aside>
 
@@ -161,6 +162,42 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- Add Device Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Add Device</h2>
+        <button class="modal-close" onclick="closeAddDeviceModal()">✕</button>
+      </div>
+
+      <!-- Step 1: enter name -->
+      <div id="modal-step-1">
+        <p class="modal-desc">Give this device a name (e.g. "Jake's iPhone"), then generate a pairing code to show on the device being added.</p>
+        <div class="form-group">
+          <label>Device Label</label>
+          <input type="text" id="new-device-label" placeholder="e.g. Jake's iPhone" />
+        </div>
+        <button class="btn btn-primary" onclick="generateAdminPairCode()">Generate Pairing Code</button>
+      </div>
+
+      <!-- Step 2: show code -->
+      <div id="modal-step-2" class="hidden">
+        <p class="modal-desc">Open the <strong>Screen Time Control</strong> app on the device, go to <strong>Remote → Child</strong>, and enter this code:</p>
+        <div class="pairing-code-display">
+          <span id="pairing-code-text">000000</span>
+        </div>
+        <p class="modal-hint">Code expires in 10 minutes. Waiting for device to connect…</p>
+        <div id="waiting-indicator" class="waiting">
+          <span class="spinner"></span> Waiting for pairing…
+        </div>
+        <div id="paired-success" class="hidden paired-success">
+          ✅ Device connected successfully!
+        </div>
+        <button class="btn btn-secondary mt" onclick="closeAddDeviceModal()">Done</button>
+      </div>
+    </div>
   </div>
 
   <!-- Toast -->
