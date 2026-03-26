@@ -1,10 +1,13 @@
 import SwiftUI
+
+#if !targetEnvironment(simulator)
 import FamilyControls
+#endif
 
 @main
 struct ScreenTimeControlApp: App {
-    @StateObject private var authManager = AuthorizationManager.shared
-    @StateObject private var settingsManager = ScreenTimeSettingsManager.shared
+    @StateObject private var authManager = ActiveAuthorizationManager.shared
+    @StateObject private var settingsManager = ActiveScreenTimeSettingsManager.shared
     @StateObject private var syncService = RemoteSyncService.shared
 
     var body: some Scene {

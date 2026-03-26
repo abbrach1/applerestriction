@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var authManager: AuthorizationManager
+    @EnvironmentObject var authManager: ActiveAuthorizationManager
     @EnvironmentObject var syncService: RemoteSyncService
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
     @State private var serverURL: String = UserDefaults.standard.string(forKey: "remote.baseURL") ?? ""
     @State private var pollingInterval: Double = 30

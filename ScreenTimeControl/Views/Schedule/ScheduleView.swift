@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ScheduleView: View {
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
     @State private var downtimeEnabled: Bool = false
     @State private var startTime = Calendar.current.date(
@@ -132,7 +132,7 @@ struct ScheduleView: View {
 }
 
 struct TimeLimitsView: View {
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @State private var timeLimitMinutes: Double = 60
     @State private var showAppPicker = false
 

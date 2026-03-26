@@ -1,3 +1,5 @@
+#if !targetEnvironment(simulator)
+
 import Foundation
 import FamilyControls
 
@@ -42,3 +44,5 @@ class SharedDefaults {
     static let blockedAppsKey = "selection.blockedApps"
     static let alwaysAllowedKey = "selection.alwaysAllowed"
 }
+
+#endif

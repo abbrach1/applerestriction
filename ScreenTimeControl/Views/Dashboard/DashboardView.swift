@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @EnvironmentObject var syncService: RemoteSyncService
 
     var body: some View {
@@ -97,6 +97,21 @@ struct DashboardView: View {
                 .font(.headline)
 
             VStack(spacing: 8) {
+                #if targetEnvironment(simulator)
+                RestrictionRow(
+                    icon: "app.badge",
+                    title: "Blocked Apps",
+                    value: "\(settingsManager.blockedAppCount) apps",
+                    isActive: settingsManager.blockedAppCount > 0
+                )
+
+                RestrictionRow(
+                    icon: "square.grid.2x2",
+                    title: "Blocked Categories",
+                    value: "\(settingsManager.blockedCategoryCount) categories",
+                    isActive: settingsManager.blockedCategoryCount > 0
+                )
+                #else
                 RestrictionRow(
                     icon: "app.badge",
                     title: "Blocked Apps",
@@ -110,6 +125,7 @@ struct DashboardView: View {
                     value: "\(settingsManager.selectedAppsToBlock.categoryTokens.count) categories",
                     isActive: !settingsManager.selectedAppsToBlock.categoryTokens.isEmpty
                 )
+                #endif
 
                 RestrictionRow(
                     icon: "moon.zzz.fill",

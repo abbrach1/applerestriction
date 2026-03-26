@@ -1,6 +1,9 @@
 import Foundation
+
+#if !targetEnvironment(simulator)
 import FamilyControls
 import ManagedSettings
+#endif
 
 /// Represents a complete set of Screen Time restrictions that can be synced remotely
 struct ScreenTimeConfiguration: Codable, Identifiable {

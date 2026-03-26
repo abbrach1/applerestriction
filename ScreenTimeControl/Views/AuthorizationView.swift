@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AuthorizationView: View {
-    @EnvironmentObject var authManager: AuthorizationManager
+    @EnvironmentObject var authManager: ActiveAuthorizationManager
 
     var body: some View {
         VStack(spacing: 32) {

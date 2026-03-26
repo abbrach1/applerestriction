@@ -1,10 +1,14 @@
 import SwiftUI
+
+#if !targetEnvironment(simulator)
 import FamilyControls
+#endif
 
 struct AppBlockingView: View {
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
     @State private var showAppPicker = false
     @State private var showAlwaysAllowedPicker = false
+
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
     var body: some View {
         NavigationStack {
@@ -21,6 +25,15 @@ struct AppBlockingView: View {
                         }
                     }
 
+                    #if targetEnvironment(simulator)
+                    if settingsManager.blockedAppCount > 0 {
+                        HStack {
+                            Image(systemName: "app.fill")
+                            Text("\(settingsManager.blockedAppCount) apps selected")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    #else
                     if !settingsManager.selectedAppsToBlock.applicationTokens.isEmpty {
                         HStack {
                             Image(systemName: "app.fill")
@@ -36,6 +49,7 @@ struct AppBlockingView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    #endif
                 } header: {
                     Text("Blocked Apps & Categories")
                 } footer: {
@@ -75,15 +89,6 @@ struct AppBlockingView: View {
                             Text("Always Allowed Apps")
                         }
                     }
-
-                    if !settingsManager.selectedAppsAlwaysAllowed.applicationTokens.isEmpty {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("\(settingsManager.selectedAppsAlwaysAllowed.applicationTokens.count) apps always allowed")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 } header: {
                     Text("Always Allowed")
                 } footer: {
@@ -91,6 +96,17 @@ struct AppBlockingView: View {
                 }
             }
             .navigationTitle("Block Apps")
+            #if targetEnvironment(simulator)
+            .sheet(isPresented: $showAppPicker) {
+                SimulatorAppPickerView(title: "Select Apps to Block") {
+                    settingsManager.blockedAppCount = 5
+                    settingsManager.blockedCategoryCount = 2
+                }
+            }
+            .sheet(isPresented: $showAlwaysAllowedPicker) {
+                SimulatorAppPickerView(title: "Always Allowed Apps") {}
+            }
+            #else
             .familyActivityPicker(
                 isPresented: $showAppPicker,
                 selection: $settingsManager.selectedAppsToBlock
@@ -99,6 +115,88 @@ struct AppBlockingView: View {
                 isPresented: $showAlwaysAllowedPicker,
                 selection: $settingsManager.selectedAppsAlwaysAllowed
             )
+            #endif
         }
     }
 }
+
+#if targetEnvironment(simulator)
+/// Stand-in picker for Simulator since FamilyActivityPicker is device-only
+struct SimulatorAppPickerView: View {
+    let title: String
+    let onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let fakeApps = [
+        ("Safari", "safari"), ("Instagram", "camera.filters"),
+        ("YouTube", "play.rectangle.fill"), ("TikTok", "music.note"),
+        ("Snapchat", "message.fill"), ("Twitter", "bird"),
+        ("Messages", "message.fill"), ("Mail", "envelope.fill"),
+    ]
+
+    @State private var selected: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Apps") {
+                    ForEach(fakeApps, id: \.0) { app in
+                        Button {
+                            if selected.contains(app.0) {
+                                selected.remove(app.0)
+                            } else {
+                                selected.insert(app.0)
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: app.1)
+                                    .frame(width: 30)
+                                Text(app.0)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selected.contains(app.0) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Categories") {
+                    ForEach(["Social", "Entertainment", "Games", "Productivity"], id: \.self) { cat in
+                        Button {
+                            if selected.contains(cat) {
+                                selected.remove(cat)
+                            } else {
+                                selected.insert(cat)
+                            }
+                        } label: {
+                            HStack {
+                                Text(cat).foregroundStyle(.primary)
+                                Spacer()
+                                if selected.contains(cat) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onDone()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+#endif

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RemoteControlView: View {
     @EnvironmentObject var syncService: RemoteSyncService
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
     @State private var pairCode: String = ""
     @State private var showPairInput: Bool = false
@@ -204,7 +204,7 @@ struct RemoteControlView: View {
 struct DeviceControlView: View {
     let device: DeviceInfo
     @EnvironmentObject var syncService: RemoteSyncService
-    @EnvironmentObject var settingsManager: ScreenTimeSettingsManager
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
     var body: some View {
         List {

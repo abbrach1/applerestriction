@@ -1,3 +1,5 @@
+#if !targetEnvironment(simulator)
+
 import Foundation
 import ManagedSettings
 import FamilyControls
@@ -180,3 +182,5 @@ class ScreenTimeSettingsManager: ObservableObject {
         }
     }
 }
+
+#endif

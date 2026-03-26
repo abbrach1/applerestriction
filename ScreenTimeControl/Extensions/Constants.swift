@@ -1,3 +1,5 @@
+#if !targetEnvironment(simulator)
+
 import Foundation
 import ManagedSettings
 import DeviceActivity
@@ -21,3 +23,5 @@ extension DeviceActivityName {
 extension DeviceActivityEvent.Name {
     static let dailyTimeLimitReached = Self("limit.daily")
 }
+
+#endif

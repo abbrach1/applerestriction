@@ -1,3 +1,5 @@
+#if !targetEnvironment(simulator)
+
 import Foundation
 import FamilyControls
 import Combine
@@ -75,3 +77,5 @@ class AuthorizationManager: ObservableObject {
         })
     }
 }
+
+#endif
