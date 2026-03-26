@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Screen Time Control — Admin</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon">⏱</span>
+          <div>
+            <div class="logo-title">Screen Time</div>
+            <div class="logo-sub">Admin Console</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section-label">Devices</div>
+      <div id="device-list" class="device-list">
+        <div class="empty-state-small">No devices connected</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="btn-icon" id="refresh-btn" title="Refresh">↺ Refresh</button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main">
+      <!-- Empty state -->
+      <div id="empty-panel" class="empty-panel">
+        <div class="empty-icon">📱</div>
+        <h2>No device selected</h2>
+        <p>Select a device from the sidebar to configure its Screen Time settings.</p>
+        <p class="hint">Devices appear here after the iOS app is installed and a pairing code is generated.</p>
+      </div>
+
+      <!-- Device panel -->
+      <div id="device-panel" class="device-panel hidden">
+
+        <!-- Device header -->
+        <div class="panel-header">
+          <div class="device-title">
+            <span class="device-icon">📱</span>
+            <div>
+              <h1 id="device-name">Device Name</h1>
+              <div class="device-meta">
+                <span id="device-model"></span>
+                <span class="dot">·</span>
+                <span id="device-os"></span>
+                <span class="dot">·</span>
+                <span id="device-status" class="status-badge"></span>
+              </div>
+            </div>
+          </div>
+          <div class="quick-actions">
+            <button class="btn btn-danger" onclick="sendCommand('lockDevice')">🔒 Lock All</button>
+            <button class="btn btn-success" onclick="sendCommand('unlockAll')">🔓 Unlock All</button>
+            <button class="btn btn-secondary" onclick="sendCommand('refreshSettings')">↺ Refresh</button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+
+          <!-- Block Apps -->
+          <section class="card">
+            <div class="card-header">
+              <h2>🛡 Blocked Apps &amp; Categories</h2>
+              <span class="card-hint">Tap an app or category to toggle blocking</span>
+            </div>
+
+            <div class="section-label">App Categories</div>
+            <div class="tag-grid" id="category-grid">
+              <!-- filled by JS -->
+            </div>
+
+            <div class="section-label mt">Specific Apps</div>
+            <div class="tag-grid" id="app-grid">
+              <!-- filled by JS -->
+            </div>
+
+            <button class="btn btn-primary mt" onclick="applyRestrictions()">Apply Restrictions</button>
+          </section>
+
+          <!-- Downtime -->
+          <section class="card">
+            <div class="card-header">
+              <h2>🌙 Downtime Schedule</h2>
+              <label class="toggle">
+                <input type="checkbox" id="downtime-toggle" onchange="toggleDowntime(this)" />
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+
+            <div id="downtime-config" class="downtime-config">
+              <div class="time-row">
+                <div class="time-field">
+                  <label>Starts</label>
+                  <input type="time" id="downtime-start" value="22:00" />
+                </div>
+                <div class="time-divider">→</div>
+                <div class="time-field">
+                  <label>Ends</label>
+                  <input type="time" id="downtime-end" value="07:00" />
+                </div>
+              </div>
+
+              <div class="section-label mt">Active Days</div>
+              <div class="day-picker">
+                <button class="day active" data-day="1">Sun</button>
+                <button class="day active" data-day="2">Mon</button>
+                <button class="day active" data-day="3">Tue</button>
+                <button class="day active" data-day="4">Wed</button>
+                <button class="day active" data-day="5">Thu</button>
+                <button class="day active" data-day="6">Fri</button>
+                <button class="day active" data-day="7">Sat</button>
+              </div>
+
+              <button class="btn btn-primary mt" onclick="applyDowntime()">Apply Schedule</button>
+            </div>
+          </section>
+
+          <!-- Time Limits -->
+          <section class="card">
+            <div class="card-header">
+              <h2>⏱ Daily Time Limit</h2>
+              <label class="toggle">
+                <input type="checkbox" id="timelimit-toggle" />
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+
+            <div class="slider-row">
+              <input type="range" id="time-limit-slider" min="5" max="480" step="5" value="60"
+                     oninput="updateTimeLimitLabel(this.value)" />
+              <span id="time-limit-label" class="slider-label">60 min</span>
+            </div>
+            <div class="slider-hints">
+              <span>5 min</span><span>4 hours</span><span>8 hours</span>
+            </div>
+
+            <button class="btn btn-primary mt" onclick="applyTimeLimit()">Apply Limit</button>
+          </section>
+
+          <!-- Command Log -->
+          <section class="card">
+            <div class="card-header">
+              <h2>📋 Recent Commands</h2>
+              <button class="btn-link" onclick="clearCommands()">Clear</button>
+            </div>
+            <div id="command-log" class="command-log">
+              <div class="empty-state-small">No commands sent yet</div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
