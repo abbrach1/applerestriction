@@ -1,9 +1,13 @@
 import ManagedSettings
-import ManagedSettingsUI
+@preconcurrency import ManagedSettingsUI
 
 class ShieldActionExtension: ShieldActionDelegate {
 
-    override func handle(
+    nonisolated override init() {
+        super.init()
+    }
+
+    nonisolated override func handle(
         action: ShieldAction,
         for application: ApplicationToken,
         completionHandler: @escaping (ShieldActionResponse) -> Void
@@ -15,7 +19,7 @@ class ShieldActionExtension: ShieldActionDelegate {
         }
     }
 
-    override func handle(
+    nonisolated override func handle(
         action: ShieldAction,
         for webDomain: WebDomainToken,
         completionHandler: @escaping (ShieldActionResponse) -> Void
@@ -27,7 +31,7 @@ class ShieldActionExtension: ShieldActionDelegate {
         }
     }
 
-    override func handle(
+    nonisolated override func handle(
         action: ShieldAction,
         for category: ActivityCategoryToken,
         completionHandler: @escaping (ShieldActionResponse) -> Void
