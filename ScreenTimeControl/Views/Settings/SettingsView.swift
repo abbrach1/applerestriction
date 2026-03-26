@@ -15,7 +15,7 @@ struct SettingsView: View {
                 // Firebase Configuration
                 Section {
                     TextField(
-                        "https://your-project-default-rtdb.firebaseio.com",
+                        "https://applerestrictions-default-rtdb.firebaseio.com",
                         text: $firebaseURL
                     )
                     .keyboardType(.URL)

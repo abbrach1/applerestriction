@@ -20,10 +20,11 @@ class RemoteSyncService: ObservableObject {
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
 
-    /// Firebase Realtime Database URL — set this in the app's Settings tab
-    /// Example: "https://my-project-default-rtdb.firebaseio.com"
+    /// Firebase Realtime Database URL
+    private static let defaultFirebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
     var firebaseURL: String {
-        get { UserDefaults.standard.string(forKey: "remote.firebaseURL") ?? "" }
+        get { UserDefaults.standard.string(forKey: "remote.firebaseURL") ?? Self.defaultFirebaseURL }
         set { UserDefaults.standard.set(newValue, forKey: "remote.firebaseURL") }
     }
 
