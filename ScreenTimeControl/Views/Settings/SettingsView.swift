@@ -5,27 +5,31 @@ struct SettingsView: View {
     @EnvironmentObject var syncService: RemoteSyncService
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
-    @State private var serverURL: String = UserDefaults.standard.string(forKey: "remote.baseURL") ?? ""
+    @State private var firebaseURL: String = ""
     @State private var pollingInterval: Double = 30
     @State private var showRevokeAlert = false
 
     var body: some View {
         NavigationStack {
             Form {
-                // Server Configuration
+                // Firebase Configuration
                 Section {
-                    TextField("Server URL", text: $serverURL)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    TextField(
+                        "https://your-project-default-rtdb.firebaseio.com",
+                        text: $firebaseURL
+                    )
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
 
-                    Button("Save Server URL") {
-                        UserDefaults.standard.set(serverURL, forKey: "remote.baseURL")
+                    Button("Save") {
+                        syncService.firebaseURL = firebaseURL
                     }
+                    .disabled(firebaseURL.isEmpty)
                 } header: {
-                    Text("Remote Server")
+                    Text("Firebase Database URL")
                 } footer: {
-                    Text("Enter the URL of your remote control server. You need to deploy your own backend for remote features to work.")
+                    Text("1. Go to console.firebase.google.com\n2. Create project → Realtime Database → Test mode\n3. Copy the database URL and paste it above.")
                 }
 
                 // Polling
@@ -116,6 +120,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                firebaseURL = syncService.firebaseURL
+            }
             .alert("Revoke Access?", isPresented: $showRevokeAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Revoke", role: .destructive) {
