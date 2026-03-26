@@ -7,40 +7,57 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10001 /* ScreenTimeControlApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10001; };
-		A10002 /* ScreenTimeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10002; };
-		A10003 /* DeviceInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10003; };
-		A10004 /* AuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10004; };
-		A10005 /* ScreenTimeSettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10005; };
-		A10006 /* RemoteSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10006; };
-		A10007 /* AuthorizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10007; };
-		A10008 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008; };
-		A10009 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10009; };
-		A10010 /* AppBlockingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10010; };
-		A10011 /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10011; };
-		A10012 /* RemoteControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012; };
-		A10013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10013; };
-		A10014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10014; };
+		/* Main app sources */
+		A10001 /* ScreenTimeControlApp.swift in Sources */     = {isa = PBXBuildFile; fileRef = B10001; };
+		A10002 /* TypeAliases.swift in Sources */              = {isa = PBXBuildFile; fileRef = B10002; };
+		A10003 /* ScreenTimeSettings.swift in Sources */       = {isa = PBXBuildFile; fileRef = B10003; };
+		A10004 /* DeviceInfo.swift in Sources */               = {isa = PBXBuildFile; fileRef = B10004; };
+		A10005 /* AuthorizationManager.swift in Sources */     = {isa = PBXBuildFile; fileRef = B10005; };
+		A10006 /* ScreenTimeSettingsManager.swift in Sources */= {isa = PBXBuildFile; fileRef = B10006; };
+		A10007 /* RemoteSyncService.swift in Sources */        = {isa = PBXBuildFile; fileRef = B10007; };
+		A10008 /* MockScreenTimeManager.swift in Sources */    = {isa = PBXBuildFile; fileRef = B10008; };
+		A10009 /* SharedDefaults.swift in Sources */           = {isa = PBXBuildFile; fileRef = B10009; };
+		A10010 /* Constants.swift in Sources */                = {isa = PBXBuildFile; fileRef = B10010; };
+		A10011 /* AuthorizationView.swift in Sources */        = {isa = PBXBuildFile; fileRef = B10011; };
+		A10012 /* MainTabView.swift in Sources */              = {isa = PBXBuildFile; fileRef = B10012; };
+		A10013 /* DashboardView.swift in Sources */            = {isa = PBXBuildFile; fileRef = B10013; };
+		A10014 /* AppBlockingView.swift in Sources */          = {isa = PBXBuildFile; fileRef = B10014; };
+		A10015 /* ScheduleView.swift in Sources */             = {isa = PBXBuildFile; fileRef = B10015; };
+		A10016 /* RemoteControlView.swift in Sources */        = {isa = PBXBuildFile; fileRef = B10016; };
+		A10017 /* SettingsView.swift in Sources */             = {isa = PBXBuildFile; fileRef = B10017; };
+		A10018 /* Assets.xcassets in Resources */              = {isa = PBXBuildFile; fileRef = B10018; };
+		/* Extension sources */
 		A20001 /* DeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001; };
-		A30001 /* ShieldConfigurationExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30001; };
-		A40001 /* DeviceActivityMonitor.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = C20000; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A40002 /* ShieldConfiguration.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = C30000; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A30001 /* ShieldConfigurationExtension.swift in Sources */   = {isa = PBXBuildFile; fileRef = B30001; };
+		A40001 /* ShieldActionExtension.swift in Sources */          = {isa = PBXBuildFile; fileRef = B40001; };
+		/* Embed extensions */
+		A50001 /* DeviceActivityMonitor.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = C20000; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A50002 /* ShieldConfiguration.appex in Embed Extensions */   = {isa = PBXBuildFile; fileRef = C30000; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A50003 /* ShieldAction.appex in Embed Extensions */          = {isa = PBXBuildFile; fileRef = C40000; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		D20001 /* PBXContainerItemProxy */ = {
+		/* NOTE: These IDs are different from the PBXTargetDependency IDs below */
+		PR20001 /* PBXContainerItemProxy — DeviceActivityMonitor */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E10000;
 			proxyType = 1;
-			remoteGlobalIDString = C20000;
+			remoteGlobalIDString = T20000;
 			remoteInfo = DeviceActivityMonitor;
 		};
-		D30001 /* PBXContainerItemProxy */ = {
+		PR30001 /* PBXContainerItemProxy — ShieldConfiguration */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E10000;
 			proxyType = 1;
-			remoteGlobalIDString = C30000;
+			remoteGlobalIDString = T30000;
 			remoteInfo = ShieldConfiguration;
+		};
+		PR40001 /* PBXContainerItemProxy — ShieldAction */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E10000;
+			proxyType = 1;
+			remoteGlobalIDString = T40000;
+			remoteInfo = ShieldAction;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -51,8 +68,9 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A40001,
-				A40002,
+				A50001 /* DeviceActivityMonitor.appex in Embed Extensions */,
+				A50002 /* ShieldConfiguration.appex in Embed Extensions */,
+				A50003 /* ShieldAction.appex in Embed Extensions */,
 			);
 			name = "Embed Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -60,159 +78,162 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		B10001 /* ScreenTimeControlApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeControlApp.swift; sourceTree = "<group>"; };
-		B10002 /* ScreenTimeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeSettings.swift; sourceTree = "<group>"; };
-		B10003 /* DeviceInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInfo.swift; sourceTree = "<group>"; };
-		B10004 /* AuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationManager.swift; sourceTree = "<group>"; };
-		B10005 /* ScreenTimeSettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeSettingsManager.swift; sourceTree = "<group>"; };
-		B10006 /* RemoteSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncService.swift; sourceTree = "<group>"; };
-		B10007 /* AuthorizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationView.swift; sourceTree = "<group>"; };
-		B10008 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
-		B10009 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		B10010 /* AppBlockingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBlockingView.swift; sourceTree = "<group>"; };
-		B10011 /* ScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
-		B10012 /* RemoteControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteControlView.swift; sourceTree = "<group>"; };
-		B10013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		B10014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B10015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		B10016 /* ScreenTimeControl.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScreenTimeControl.entitlements; sourceTree = "<group>"; };
+		/* Main app */
+		B10001 /* ScreenTimeControlApp.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeControlApp.swift; sourceTree = "<group>"; };
+		B10002 /* TypeAliases.swift */               = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypeAliases.swift; sourceTree = "<group>"; };
+		B10003 /* ScreenTimeSettings.swift */        = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeSettings.swift; sourceTree = "<group>"; };
+		B10004 /* DeviceInfo.swift */                = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceInfo.swift; sourceTree = "<group>"; };
+		B10005 /* AuthorizationManager.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationManager.swift; sourceTree = "<group>"; };
+		B10006 /* ScreenTimeSettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeSettingsManager.swift; sourceTree = "<group>"; };
+		B10007 /* RemoteSyncService.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncService.swift; sourceTree = "<group>"; };
+		B10008 /* MockScreenTimeManager.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScreenTimeManager.swift; sourceTree = "<group>"; };
+		B10009 /* SharedDefaults.swift */            = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedDefaults.swift; sourceTree = "<group>"; };
+		B10010 /* Constants.swift */                 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
+		B10011 /* AuthorizationView.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationView.swift; sourceTree = "<group>"; };
+		B10012 /* MainTabView.swift */               = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		B10013 /* DashboardView.swift */             = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		B10014 /* AppBlockingView.swift */           = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBlockingView.swift; sourceTree = "<group>"; };
+		B10015 /* ScheduleView.swift */              = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
+		B10016 /* RemoteControlView.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteControlView.swift; sourceTree = "<group>"; };
+		B10017 /* SettingsView.swift */              = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B10018 /* Assets.xcassets */                 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10019 /* Info.plist */                      = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10020 /* ScreenTimeControl.entitlements */  = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScreenTimeControl.entitlements; sourceTree = "<group>"; };
+		/* DeviceActivityMonitor extension */
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
-		B20002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20002 /* Info.plist */                           = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20003 /* DeviceActivityMonitor.entitlements */   = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DeviceActivityMonitor.entitlements; sourceTree = "<group>"; };
+		/* ShieldConfiguration extension */
 		B30001 /* ShieldConfigurationExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShieldConfigurationExtension.swift; sourceTree = "<group>"; };
-		B30002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		C10000 /* ScreenTimeControl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScreenTimeControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		C20000 /* DeviceActivityMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		C30000 /* ShieldConfiguration.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShieldConfiguration.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30002 /* Info.plist */                          = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B30003 /* ShieldConfiguration.entitlements */    = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldConfiguration.entitlements; sourceTree = "<group>"; };
+		/* ShieldAction extension */
+		B40001 /* ShieldActionExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShieldActionExtension.swift; sourceTree = "<group>"; };
+		B40002 /* Info.plist */                  = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B40003 /* ShieldAction.entitlements */   = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldAction.entitlements; sourceTree = "<group>"; };
+		/* Products */
+		C10000 /* ScreenTimeControl.app */         = {isa = PBXFileReference; explicitFileType = wrapper.application;    includeInIndex = 0; path = ScreenTimeControl.app;         sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000 /* DeviceActivityMonitor.appex */   = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex;   sourceTree = BUILT_PRODUCTS_DIR; };
+		C30000 /* ShieldConfiguration.appex */     = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShieldConfiguration.appex;     sourceTree = BUILT_PRODUCTS_DIR; };
+		C40000 /* ShieldAction.appex */            = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShieldAction.appex;            sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		F20001 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F20002 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F20003 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+		FW10001 /* Frameworks — ScreenTimeControl */        = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		FW20001 /* Frameworks — DeviceActivityMonitor */    = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		FW30001 /* Frameworks — ShieldConfiguration */      = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		FW40001 /* Frameworks — ShieldAction */             = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		G10000 = {
+		G00000 /* root */ = {
 			isa = PBXGroup;
 			children = (
-				G10001 /* ScreenTimeControl */,
+				G10000 /* ScreenTimeControl */,
 				G20000 /* DeviceActivityMonitor */,
 				G30000 /* ShieldConfiguration */,
-				G40000 /* Products */,
+				G40000 /* ShieldAction */,
+				G50000 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		G10001 /* ScreenTimeControl */ = {
+		G10000 /* ScreenTimeControl */ = {
 			isa = PBXGroup;
 			children = (
-				G10002 /* App */,
-				G10003 /* Models */,
-				G10004 /* Services */,
-				G10005 /* Views */,
+				G10001 /* App */,
+				G10002 /* Models */,
+				G10003 /* Services */,
+				G10004 /* Views */,
 				G10009 /* Extensions */,
-				B10014 /* Assets.xcassets */,
-				B10015 /* Info.plist */,
-				B10016 /* ScreenTimeControl.entitlements */,
+				B10018 /* Assets.xcassets */,
+				B10019 /* Info.plist */,
+				B10020 /* ScreenTimeControl.entitlements */,
 			);
 			path = ScreenTimeControl;
 			sourceTree = "<group>";
 		};
-		G10002 /* App */ = {
+		G10001 /* App */ = {
 			isa = PBXGroup;
 			children = (
 				B10001 /* ScreenTimeControlApp.swift */,
+				B10002 /* TypeAliases.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
 		};
-		G10003 /* Models */ = {
+		G10002 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				B10002 /* ScreenTimeSettings.swift */,
-				B10003 /* DeviceInfo.swift */,
+				B10003 /* ScreenTimeSettings.swift */,
+				B10004 /* DeviceInfo.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
-		G10004 /* Services */ = {
+		G10003 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				B10004 /* AuthorizationManager.swift */,
-				B10005 /* ScreenTimeSettingsManager.swift */,
-				B10006 /* RemoteSyncService.swift */,
+				B10005 /* AuthorizationManager.swift */,
+				B10006 /* ScreenTimeSettingsManager.swift */,
+				B10007 /* RemoteSyncService.swift */,
+				B10008 /* MockScreenTimeManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
 		};
-		G10005 /* Views */ = {
+		G10004 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				B10007 /* AuthorizationView.swift */,
-				B10008 /* MainTabView.swift */,
-				G10006 /* Dashboard */,
-				G10007 /* AppPicker */,
-				G10008 /* Schedule */,
-				G10010 /* Settings */,
+				B10011 /* AuthorizationView.swift */,
+				B10012 /* MainTabView.swift */,
+				G10005 /* Dashboard */,
+				G10006 /* AppPicker */,
+				G10007 /* Schedule */,
+				G10008 /* Settings */,
 			);
 			path = Views;
 			sourceTree = "<group>";
 		};
-		G10006 /* Dashboard */ = {
+		G10005 /* Dashboard */ = {
 			isa = PBXGroup;
 			children = (
-				B10009 /* DashboardView.swift */,
+				B10013 /* DashboardView.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		G10007 /* AppPicker */ = {
+		G10006 /* AppPicker */ = {
 			isa = PBXGroup;
 			children = (
-				B10010 /* AppBlockingView.swift */,
+				B10014 /* AppBlockingView.swift */,
 			);
 			path = AppPicker;
 			sourceTree = "<group>";
 		};
-		G10008 /* Schedule */ = {
+		G10007 /* Schedule */ = {
 			isa = PBXGroup;
 			children = (
-				B10011 /* ScheduleView.swift */,
+				B10015 /* ScheduleView.swift */,
 			);
 			path = Schedule;
+			sourceTree = "<group>";
+		};
+		G10008 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				B10016 /* RemoteControlView.swift */,
+				B10017 /* SettingsView.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		G10009 /* Extensions */ = {
 			isa = PBXGroup;
 			children = (
+				B10009 /* SharedDefaults.swift */,
+				B10010 /* Constants.swift */,
 			);
 			path = Extensions;
-			sourceTree = "<group>";
-		};
-		G10010 /* Settings */ = {
-			isa = PBXGroup;
-			children = (
-				B10012 /* RemoteControlView.swift */,
-				B10013 /* SettingsView.swift */,
-			);
-			path = Settings;
 			sourceTree = "<group>";
 		};
 		G20000 /* DeviceActivityMonitor */ = {
@@ -220,6 +241,7 @@
 			children = (
 				B20001 /* DeviceActivityMonitorExtension.swift */,
 				B20002 /* Info.plist */,
+				B20003 /* DeviceActivityMonitor.entitlements */,
 			);
 			path = DeviceActivityMonitor;
 			sourceTree = "<group>";
@@ -229,16 +251,28 @@
 			children = (
 				B30001 /* ShieldConfigurationExtension.swift */,
 				B30002 /* Info.plist */,
+				B30003 /* ShieldConfiguration.entitlements */,
 			);
 			path = ShieldConfiguration;
 			sourceTree = "<group>";
 		};
-		G40000 /* Products */ = {
+		G40000 /* ShieldAction */ = {
+			isa = PBXGroup;
+			children = (
+				B40001 /* ShieldActionExtension.swift */,
+				B40002 /* Info.plist */,
+				B40003 /* ShieldAction.entitlements */,
+			);
+			path = ShieldAction;
+			sourceTree = "<group>";
+		};
+		G50000 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				C10000 /* ScreenTimeControl.app */,
 				C20000 /* DeviceActivityMonitor.appex */,
 				C30000 /* ShieldConfiguration.appex */,
+				C40000 /* ShieldAction.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -251,15 +285,15 @@
 			buildConfigurationList = X10000;
 			buildPhases = (
 				S10000 /* Sources */,
-				F20001 /* Frameworks */,
+				FW10001 /* Frameworks */,
 				R10000 /* Resources */,
 				F10001 /* Embed Extensions */,
 			);
-			buildRules = (
-			);
+			buildRules = ();
 			dependencies = (
-				D20001,
-				D30001,
+				TD20001 /* DeviceActivityMonitor dependency */,
+				TD30001 /* ShieldConfiguration dependency */,
+				TD40001 /* ShieldAction dependency */,
 			);
 			name = ScreenTimeControl;
 			productName = ScreenTimeControl;
@@ -271,12 +305,10 @@
 			buildConfigurationList = X20000;
 			buildPhases = (
 				S20000 /* Sources */,
-				F20002 /* Frameworks */,
+				FW20001 /* Frameworks */,
 			);
-			buildRules = (
-			);
-			dependencies = (
-			);
+			buildRules = ();
+			dependencies = ();
 			name = DeviceActivityMonitor;
 			productName = DeviceActivityMonitor;
 			productReference = C20000;
@@ -287,15 +319,27 @@
 			buildConfigurationList = X30000;
 			buildPhases = (
 				S30000 /* Sources */,
-				F20003 /* Frameworks */,
+				FW30001 /* Frameworks */,
 			);
-			buildRules = (
-			);
-			dependencies = (
-			);
+			buildRules = ();
+			dependencies = ();
 			name = ShieldConfiguration;
 			productName = ShieldConfiguration;
 			productReference = C30000;
+			productType = "com.apple.product-type.app-extension";
+		};
+		T40000 /* ShieldAction */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X40000;
+			buildPhases = (
+				S40000 /* Sources */,
+				FW40001 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = ShieldAction;
+			productName = ShieldAction;
+			productReference = C40000;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -308,107 +352,115 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
-					T10000 = {
-						CreatedOnToolsVersion = 15.0;
-					};
-					T20000 = {
-						CreatedOnToolsVersion = 15.0;
-					};
-					T30000 = {
-						CreatedOnToolsVersion = 15.0;
-					};
+					T10000 = { CreatedOnToolsVersion = 15.0; };
+					T20000 = { CreatedOnToolsVersion = 15.0; };
+					T30000 = { CreatedOnToolsVersion = 15.0; };
+					T40000 = { CreatedOnToolsVersion = 15.0; };
 				};
 			};
 			buildConfigurationList = X00000;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
-			mainGroup = G10000;
-			productRefGroup = G40000;
+			knownRegions = (en, Base);
+			mainGroup = G00000;
+			productRefGroup = G50000;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				T10000 /* ScreenTimeControl */,
 				T20000 /* DeviceActivityMonitor */,
 				T30000 /* ShieldConfiguration */,
+				T40000 /* ShieldAction */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		R10000 /* Resources */ = {
+		R10000 /* Resources — ScreenTimeControl */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10014 /* Assets.xcassets in Resources */,
+				A10018 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		S10000 /* Sources */ = {
+		S10000 /* Sources — ScreenTimeControl */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10001,
-				A10002,
-				A10003,
-				A10004,
-				A10005,
-				A10006,
-				A10007,
-				A10008,
-				A10009,
-				A10010,
-				A10011,
-				A10012,
-				A10013,
+				A10001 /* ScreenTimeControlApp.swift */,
+				A10002 /* TypeAliases.swift */,
+				A10003 /* ScreenTimeSettings.swift */,
+				A10004 /* DeviceInfo.swift */,
+				A10005 /* AuthorizationManager.swift */,
+				A10006 /* ScreenTimeSettingsManager.swift */,
+				A10007 /* RemoteSyncService.swift */,
+				A10008 /* MockScreenTimeManager.swift */,
+				A10009 /* SharedDefaults.swift */,
+				A10010 /* Constants.swift */,
+				A10011 /* AuthorizationView.swift */,
+				A10012 /* MainTabView.swift */,
+				A10013 /* DashboardView.swift */,
+				A10014 /* AppBlockingView.swift */,
+				A10015 /* ScheduleView.swift */,
+				A10016 /* RemoteControlView.swift */,
+				A10017 /* SettingsView.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		S20000 /* Sources */ = {
+		S20000 /* Sources — DeviceActivityMonitor */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A20001,
+				A20001 /* DeviceActivityMonitorExtension.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		S30000 /* Sources */ = {
+		S30000 /* Sources — ShieldConfiguration */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A30001,
+				A30001 /* ShieldConfigurationExtension.swift */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S40000 /* Sources — ShieldAction */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40001 /* ShieldActionExtension.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		D20001 /* PBXTargetDependency */ = {
+		TD20001 /* DeviceActivityMonitor dependency */ = {
 			isa = PBXTargetDependency;
 			target = T20000;
-			targetProxy = D20001;
+			targetProxy = PR20001;
 		};
-		D30001 /* PBXTargetDependency */ = {
+		TD30001 /* ShieldConfiguration dependency */ = {
 			isa = PBXTargetDependency;
 			target = T30000;
-			targetProxy = D30001;
+			targetProxy = PR30001;
+		};
+		TD40001 /* ShieldAction dependency */ = {
+			isa = PBXTargetDependency;
+			target = T40000;
+			targetProxy = PR40001;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		/* Project-level Debug */
-		XC0001 /* Debug */ = {
+		XC0001 /* Debug — Project */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
@@ -419,11 +471,7 @@
 				ENABLE_TESTABILITY = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)");
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
@@ -439,12 +487,10 @@
 			};
 			name = Debug;
 		};
-		/* Project-level Release */
-		XC0002 /* Release */ = {
+		XC0002 /* Release — Project */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
@@ -453,13 +499,11 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -468,8 +512,7 @@
 			};
 			name = Release;
 		};
-		/* App Target Debug */
-		XC1001 /* Debug */ = {
+		XC1001 /* Debug — ScreenTimeControl */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -477,16 +520,8 @@
 				CODE_SIGN_ENTITLEMENTS = ScreenTimeControl/ScreenTimeControl.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -495,8 +530,7 @@
 			};
 			name = Debug;
 		};
-		/* App Target Release */
-		XC1002 /* Release */ = {
+		XC1002 /* Release — ScreenTimeControl */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -504,16 +538,8 @@
 				CODE_SIGN_ENTITLEMENTS = ScreenTimeControl/ScreenTimeControl.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -522,19 +548,14 @@
 			};
 			name = Release;
 		};
-		/* DeviceActivityMonitor Debug */
-		XC2001 /* Debug */ = {
+		XC2001 /* Debug — DeviceActivityMonitor */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DeviceActivityMonitor/DeviceActivityMonitor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.activity-monitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -544,19 +565,14 @@
 			};
 			name = Debug;
 		};
-		/* DeviceActivityMonitor Release */
-		XC2002 /* Release */ = {
+		XC2002 /* Release — DeviceActivityMonitor */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DeviceActivityMonitor/DeviceActivityMonitor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.activity-monitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -566,19 +582,14 @@
 			};
 			name = Release;
 		};
-		/* ShieldConfiguration Debug */
-		XC3001 /* Debug */ = {
+		XC3001 /* Debug — ShieldConfiguration */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShieldConfiguration/ShieldConfiguration.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-config;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -588,21 +599,50 @@
 			};
 			name = Debug;
 		};
-		/* ShieldConfiguration Release */
-		XC3002 /* Release */ = {
+		XC3002 /* Release — ShieldConfiguration */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShieldConfiguration/ShieldConfiguration.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-config;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Release;
+		};
+		XC4001 /* Debug — ShieldAction */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShieldAction/ShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = ShieldAction/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-action;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Debug;
+		};
+		XC4002 /* Release — ShieldAction */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShieldAction/ShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = ShieldAction/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-action;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -615,37 +655,31 @@
 /* Begin XCConfigurationList section */
 		X00000 /* Build configuration list for PBXProject */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				XC0001 /* Debug */,
-				XC0002 /* Release */,
-			);
+			buildConfigurations = (XC0001 /* Debug */, XC0002 /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		X10000 /* Build configuration list for ScreenTimeControl */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				XC1001 /* Debug */,
-				XC1002 /* Release */,
-			);
+			buildConfigurations = (XC1001 /* Debug */, XC1002 /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		X20000 /* Build configuration list for DeviceActivityMonitor */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				XC2001 /* Debug */,
-				XC2002 /* Release */,
-			);
+			buildConfigurations = (XC2001 /* Debug */, XC2002 /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		X30000 /* Build configuration list for ShieldConfiguration */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (
-				XC3001 /* Debug */,
-				XC3002 /* Release */,
-			);
+			buildConfigurations = (XC3001 /* Debug */, XC3002 /* Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X40000 /* Build configuration list for ShieldAction */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (XC4001 /* Debug */, XC4002 /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
