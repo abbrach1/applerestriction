@@ -20,7 +20,7 @@ struct ScheduleView: View {
                 // Downtime Toggle
                 Section {
                     Toggle("Enable Downtime", isOn: $downtimeEnabled)
-                        .onChange(of: downtimeEnabled) { _, newValue in
+                        .onChange(of: downtimeEnabled) { newValue in
                             if newValue {
                                 applySchedule()
                             } else {

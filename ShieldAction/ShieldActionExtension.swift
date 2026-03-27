@@ -9,9 +9,12 @@ class ShieldActionExtension: ShieldActionDelegate {
         completionHandler: @escaping (ShieldActionResponse) -> Void
     ) {
         switch action {
-        case .primaryButtonPressed:   completionHandler(.close)
-        case .secondaryButtonPressed: completionHandler(.defer)
-        @unknown default:             completionHandler(.close)
+        case .primaryButtonPressed:
+            completionHandler(.close)
+        case .secondaryButtonPressed:
+            completionHandler(.defer)
+        default:
+            completionHandler(.close)
         }
     }
 
@@ -21,9 +24,12 @@ class ShieldActionExtension: ShieldActionDelegate {
         completionHandler: @escaping (ShieldActionResponse) -> Void
     ) {
         switch action {
-        case .primaryButtonPressed:   completionHandler(.close)
-        case .secondaryButtonPressed: completionHandler(.defer)
-        @unknown default:             completionHandler(.close)
+        case .primaryButtonPressed:
+            completionHandler(.close)
+        case .secondaryButtonPressed:
+            completionHandler(.defer)
+        default:
+            completionHandler(.close)
         }
     }
 
@@ -33,9 +39,12 @@ class ShieldActionExtension: ShieldActionDelegate {
         completionHandler: @escaping (ShieldActionResponse) -> Void
     ) {
         switch action {
-        case .primaryButtonPressed:   completionHandler(.close)
-        case .secondaryButtonPressed: completionHandler(.defer)
-        @unknown default:             completionHandler(.close)
+        case .primaryButtonPressed:
+            completionHandler(.close)
+        case .secondaryButtonPressed:
+            completionHandler(.defer)
+        default:
+            completionHandler(.close)
         }
     }
 }

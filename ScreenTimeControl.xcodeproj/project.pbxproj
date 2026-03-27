@@ -104,14 +104,17 @@
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		B20002 /* Info.plist */                           = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20003 /* DeviceActivityMonitor.entitlements */   = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DeviceActivityMonitor.entitlements; sourceTree = "<group>"; };
+		B20004 /* DeviceActivityMonitor-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "DeviceActivityMonitor-Simulator.entitlements"; sourceTree = "<group>"; };
 		/* ShieldConfiguration extension */
 		B30001 /* ShieldConfigurationExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShieldConfigurationExtension.swift; sourceTree = "<group>"; };
 		B30002 /* Info.plist */                          = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B30003 /* ShieldConfiguration.entitlements */    = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldConfiguration.entitlements; sourceTree = "<group>"; };
+		B30004 /* ShieldConfiguration-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShieldConfiguration-Simulator.entitlements"; sourceTree = "<group>"; };
 		/* ShieldAction extension */
 		B40001 /* ShieldActionExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShieldActionExtension.swift; sourceTree = "<group>"; };
 		B40002 /* Info.plist */                  = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B40003 /* ShieldAction.entitlements */   = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldAction.entitlements; sourceTree = "<group>"; };
+		B40004 /* ShieldAction-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShieldAction-Simulator.entitlements"; sourceTree = "<group>"; };
 		/* Products */
 		C10000 /* ScreenTimeControl.app */         = {isa = PBXFileReference; explicitFileType = wrapper.application;    includeInIndex = 0; path = ScreenTimeControl.app;         sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000 /* DeviceActivityMonitor.appex */   = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex;   sourceTree = BUILT_PRODUCTS_DIR; };
@@ -244,6 +247,7 @@
 				B20001 /* DeviceActivityMonitorExtension.swift */,
 				B20002 /* Info.plist */,
 				B20003 /* DeviceActivityMonitor.entitlements */,
+				B20004 /* DeviceActivityMonitor-Simulator.entitlements */,
 			);
 			path = DeviceActivityMonitor;
 			sourceTree = "<group>";
@@ -254,6 +258,7 @@
 				B30001 /* ShieldConfigurationExtension.swift */,
 				B30002 /* Info.plist */,
 				B30003 /* ShieldConfiguration.entitlements */,
+				B30004 /* ShieldConfiguration-Simulator.entitlements */,
 			);
 			path = ShieldConfiguration;
 			sourceTree = "<group>";
@@ -264,6 +269,7 @@
 				B40001 /* ShieldActionExtension.swift */,
 				B40002 /* Info.plist */,
 				B40003 /* ShieldAction.entitlements */,
+				B40004 /* ShieldAction-Simulator.entitlements */,
 			);
 			path = ShieldAction;
 			sourceTree = "<group>";
@@ -556,6 +562,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = DeviceActivityMonitor/DeviceActivityMonitor.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "DeviceActivityMonitor/DeviceActivityMonitor-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
@@ -575,6 +582,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = DeviceActivityMonitor/DeviceActivityMonitor.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "DeviceActivityMonitor/DeviceActivityMonitor-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
@@ -594,6 +602,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShieldConfiguration/ShieldConfiguration.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ShieldConfiguration/ShieldConfiguration-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
@@ -613,6 +622,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShieldConfiguration/ShieldConfiguration.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ShieldConfiguration/ShieldConfiguration-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
@@ -632,6 +642,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShieldAction/ShieldAction.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ShieldAction/ShieldAction-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ShieldAction/Info.plist;
@@ -651,6 +662,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShieldAction/ShieldAction.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ShieldAction/ShieldAction-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ShieldAction/Info.plist;
