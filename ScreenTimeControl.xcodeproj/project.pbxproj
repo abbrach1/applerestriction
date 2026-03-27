@@ -532,7 +532,7 @@
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1";
@@ -551,7 +551,7 @@
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1";
@@ -568,7 +568,7 @@
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.activity-monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.activity-monitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -588,7 +588,7 @@
 				INFOPLIST_FILE = DeviceActivityMonitor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.activity-monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.activity-monitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -608,7 +608,7 @@
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-config;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.shield-config;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -628,7 +628,7 @@
 				INFOPLIST_FILE = ShieldConfiguration/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-config;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.shield-config;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -648,7 +648,7 @@
 				INFOPLIST_FILE = ShieldAction/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-action;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.shield-action;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -668,7 +668,7 @@
 				INFOPLIST_FILE = ShieldAction/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.screentime.control.shield-action;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrol.shield-action;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
