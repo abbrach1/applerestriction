@@ -9,6 +9,8 @@
         <key>NSExtensionPrincipalClass</key>
         <string>$(PRODUCT_MODULE_NAME).DeviceActivityMonitorExtension</string>
     </dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleDisplayName</key>
     <string>Activity Monitor</string>
     <key>CFBundleIdentifier</key>

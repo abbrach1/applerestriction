@@ -9,6 +9,8 @@
         <key>NSExtensionPrincipalClass</key>
         <string>$(PRODUCT_MODULE_NAME).ShieldConfigurationExtension</string>
     </dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleDisplayName</key>
     <string>Shield Configuration</string>
     <key>CFBundleIdentifier</key>
