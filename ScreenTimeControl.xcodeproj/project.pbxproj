@@ -99,6 +99,7 @@
 		B10018 /* Assets.xcassets */                 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10019 /* Info.plist */                      = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10020 /* ScreenTimeControl.entitlements */  = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScreenTimeControl.entitlements; sourceTree = "<group>"; };
+		B10021 /* ScreenTimeControl-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ScreenTimeControl-Simulator.entitlements"; sourceTree = "<group>"; };
 		/* DeviceActivityMonitor extension */
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		B20002 /* Info.plist */                           = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -148,6 +149,7 @@
 				B10018 /* Assets.xcassets */,
 				B10019 /* Info.plist */,
 				B10020 /* ScreenTimeControl.entitlements */,
+				B10021 /* ScreenTimeControl-Simulator.entitlements */,
 			);
 			path = ScreenTimeControl;
 			sourceTree = "<group>";
@@ -518,6 +520,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ScreenTimeControl/ScreenTimeControl.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ScreenTimeControl/ScreenTimeControl-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
@@ -536,6 +539,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ScreenTimeControl/ScreenTimeControl.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "ScreenTimeControl/ScreenTimeControl-Simulator.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = ScreenTimeControl/Info.plist;
