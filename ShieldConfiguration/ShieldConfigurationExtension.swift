@@ -1,14 +1,10 @@
 import ManagedSettings
-@preconcurrency import ManagedSettingsUI
+import ManagedSettingsUI
 import UIKit
 
 class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
-    nonisolated override init() {
-        super.init()
-    }
-
-    nonisolated override func configuration(shielding application: Application) -> ShieldConfiguration {
+    override func configuration(shielding application: Application) -> ShieldConfiguration {
         ShieldConfiguration(
             backgroundBlurStyle: .systemUltraThinMaterial,
             backgroundColor: UIColor.systemBackground,
@@ -29,7 +25,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         )
     }
 
-    nonisolated override func configuration(
+    override func configuration(
         shielding application: Application,
         in category: ActivityCategory
     ) -> ShieldConfiguration {
@@ -47,7 +43,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         )
     }
 
-    nonisolated override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
+    override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
         ShieldConfiguration(
             backgroundBlurStyle: .systemUltraThinMaterial,
             backgroundColor: UIColor.systemBackground,
@@ -63,7 +59,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         )
     }
 
-    nonisolated override func configuration(
+    override func configuration(
         shielding webDomain: WebDomain,
         in category: ActivityCategory
     ) -> ShieldConfiguration {
