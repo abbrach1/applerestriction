@@ -24,9 +24,7 @@ class AuthorizationManager: ObservableObject {
         switch center.authorizationStatus {
         case .approved:
             isAuthorized = true
-        case .denied, .notDetermined:
-            isAuthorized = false
-        @unknown default:
+        default:
             isAuthorized = false
         }
     }
