@@ -29,16 +29,29 @@ class RemoteSyncService: ObservableObject {
     }
 
     private var deviceId: String { DeviceInfo.current.id }
-
     private var pollTimer: Timer?
 
-    private init() {
-        isPaired = UserDefaults.standard.bool(forKey: "remote.isPaired")
-        pairingCode = UserDefaults.standard.string(forKey: "remote.pairingCode") ?? ""
-        if let saved = UserDefaults.standard.data(forKey: "remote.connectedDevices"),
-           let devices = try? JSONDecoder().decode([DeviceInfo].self, from: saved) {
-            connectedDevices = devices
-        }
+    private init() {}
+
+    // MARK: - Child Device Registration
+
+    /// Call after login: registers this device under the user's UID in Firebase
+    func registerDevice(uid: String, email: String, idToken: String) async {
+        let info: [String: Any] = [
+            "email": email,
+            "deviceName": DeviceInfo.current.name,
+            "deviceModel": DeviceInfo.current.model,
+            "deviceId": deviceId,
+            "isOnline": true,
+            "lastSeen": ISO8601DateFormatter().string(from: Date())
+        ]
+        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/info.json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: info)
+        _ = try? await URLSession.shared.data(for: req)
+        isPaired = true
     }
 
     // MARK: - Pairing
@@ -142,15 +155,14 @@ class RemoteSyncService: ObservableObject {
         }
     }
 
-    /// Child → fetches all unexecuted commands from Firebase
+    /// Child → fetches all unexecuted commands from Firebase (UID-based path)
     func checkForCommands() async -> [RemoteCommand] {
+        let auth = FirebaseAuthService.shared
+        guard let user = auth.currentUser else { return [] }
+        let path = "users/\(user.uid)/commands"
         do {
-            let data = try await firebaseGet(path: "devices/\(deviceId)/commands")
-            // Firebase returns a dict of {pushId: command}
-            guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return []
-            }
-
+            let data = try await firebaseGet(path: path, idToken: user.idToken)
+            guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
             var commands: [RemoteCommand] = []
             for (_, value) in dict {
                 if let cmdData = try? JSONSerialization.data(withJSONObject: value),
@@ -159,26 +171,23 @@ class RemoteSyncService: ObservableObject {
                     commands.append(cmd)
                 }
             }
-
             pendingCommands = commands
             return commands
-        } catch {
-            return []
-        }
+        } catch { return [] }
     }
 
     /// Child → marks a command as done by deleting it from Firebase
     func markCommandExecuted(_ commandId: String) async {
-        // Find and delete the command node
-        // We stored commandId in the object — use a query to find its Firebase key
-        // Simplest: just delete all executed commands by re-fetching and deleting matches
-        if let data = try? await firebaseGet(path: "devices/\(deviceId)/commands"),
+        let auth = FirebaseAuthService.shared
+        guard let user = auth.currentUser else { return }
+        let path = "users/\(user.uid)/commands"
+        if let data = try? await firebaseGet(path: path, idToken: user.idToken),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for (pushKey, value) in dict {
                 if let cmdData = try? JSONSerialization.data(withJSONObject: value),
                    let cmd = try? JSONDecoder().decode(RemoteCommand.self, from: cmdData),
                    cmd.id == commandId {
-                    try? await firebaseDelete(path: "devices/\(deviceId)/commands/\(pushKey)")
+                    try? await firebaseDelete(path: "\(path)/\(pushKey)", idToken: user.idToken)
                 }
             }
         }
@@ -229,8 +238,8 @@ class RemoteSyncService: ObservableObject {
 
     // MARK: - Firebase REST Helpers
 
-    private func firebaseGet(path: String) async throws -> Data {
-        let url = try firebaseURL(for: path)
+    private func firebaseGet(path: String, idToken: String? = nil) async throws -> Data {
+        let url = try makeURL(for: path, idToken: idToken)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -238,8 +247,8 @@ class RemoteSyncService: ObservableObject {
         return data
     }
 
-    private func firebasePut(path: String, body: [String: Any]) async throws {
-        let url = try firebaseURL(for: path)
+    private func firebasePut(path: String, body: [String: Any], idToken: String? = nil) async throws {
+        let url = try makeURL(for: path, idToken: idToken)
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -248,8 +257,8 @@ class RemoteSyncService: ObservableObject {
         try checkResponse(response, data: data)
     }
 
-    private func firebasePost(path: String, body: [String: Any]) async throws {
-        let url = try firebaseURL(for: path)
+    private func firebasePost(path: String, body: [String: Any], idToken: String? = nil) async throws {
+        let url = try makeURL(for: path, idToken: idToken)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -258,27 +267,27 @@ class RemoteSyncService: ObservableObject {
         try checkResponse(response, data: data)
     }
 
-    private func firebaseDelete(path: String) async throws {
-        let url = try firebaseURL(for: path)
+    private func firebaseDelete(path: String, idToken: String? = nil) async throws {
+        let url = try makeURL(for: path, idToken: idToken)
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         let (data, response) = try await URLSession.shared.data(for: request)
         try checkResponse(response, data: data)
     }
 
-    private func firebaseURL(for path: String) throws -> URL {
-        guard !firebaseURL.isEmpty else {
-            throw NSError(
-                domain: "RemoteSync",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Firebase URL not set. Go to Settings and enter your Firebase database URL."]
-            )
-        }
+    private func makeURL(for path: String, idToken: String?) throws -> URL {
         let base = firebaseURL.hasSuffix("/") ? firebaseURL : firebaseURL + "/"
-        guard let url = URL(string: "\(base)\(path).json") else {
-            throw URLError(.badURL)
+        var urlStr = "\(base)\(path).json"
+        if let token = idToken, !token.isEmpty {
+            urlStr += "?auth=\(token)"
         }
+        guard let url = URL(string: urlStr) else { throw URLError(.badURL) }
         return url
+    }
+
+    // Keep old firebaseURL(for:) as alias for legacy call sites
+    private func firebaseURL(for path: String) throws -> URL {
+        try makeURL(for: path, idToken: FirebaseAuthService.shared.currentUser?.idToken)
     }
 
     private func checkResponse(_ response: URLResponse, data: Data) throws {

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var authManager: ActiveAuthorizationManager
     @EnvironmentObject var syncService: RemoteSyncService
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+    @EnvironmentObject var auth: FirebaseAuthService
 
     @State private var firebaseURL: String = ""
     @State private var pollingInterval: Double = 30
@@ -102,6 +103,23 @@ struct SettingsView: View {
                 }
 
                 // About
+                Section {
+                    if let user = auth.currentUser {
+                        HStack {
+                            Text("Logged in as")
+                            Spacer()
+                            Text(user.email)
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                    Button("Sign Out", role: .destructive) {
+                        auth.signOut()
+                    }
+                } header: {
+                    Text("Account")
+                }
+
                 Section("About") {
                     HStack {
                         Text("App")

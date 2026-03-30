@@ -26,6 +26,9 @@
 		A10016 /* RemoteControlView.swift in Sources */        = {isa = PBXBuildFile; fileRef = B10016; };
 		A10017 /* SettingsView.swift in Sources */             = {isa = PBXBuildFile; fileRef = B10017; };
 		A10018 /* Assets.xcassets in Resources */              = {isa = PBXBuildFile; fileRef = B10018; };
+		A10022 /* FirebaseAuthService.swift in Sources */      = {isa = PBXBuildFile; fileRef = B10022; };
+		A10023 /* LoginView.swift in Sources */                = {isa = PBXBuildFile; fileRef = B10023; };
+		A10024 /* AdminDashboardView.swift in Sources */       = {isa = PBXBuildFile; fileRef = B10024; };
 		/* Extension sources */
 		A20001 /* DeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001; };
 		A30001 /* ShieldConfigurationExtension.swift in Sources */   = {isa = PBXBuildFile; fileRef = B30001; };
@@ -100,6 +103,9 @@
 		B10019 /* Info.plist */                      = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10020 /* ScreenTimeControl.entitlements */  = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScreenTimeControl.entitlements; sourceTree = "<group>"; };
 		B10021 /* ScreenTimeControl-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ScreenTimeControl-Simulator.entitlements"; sourceTree = "<group>"; };
+		B10022 /* FirebaseAuthService.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthService.swift; sourceTree = "<group>"; };
+		B10023 /* LoginView.swift */            = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		B10024 /* AdminDashboardView.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminDashboardView.swift; sourceTree = "<group>"; };
 		/* DeviceActivityMonitor extension */
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		B20002 /* Info.plist */                           = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -182,6 +188,7 @@
 				B10006 /* ScreenTimeSettingsManager.swift */,
 				B10007 /* RemoteSyncService.swift */,
 				B10008 /* MockScreenTimeManager.swift */,
+				B10022 /* FirebaseAuthService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -191,12 +198,22 @@
 			children = (
 				B10011 /* AuthorizationView.swift */,
 				B10012 /* MainTabView.swift */,
+				B10023 /* LoginView.swift */,
+				G10010 /* Admin */,
 				G10005 /* Dashboard */,
 				G10006 /* AppPicker */,
 				G10007 /* Schedule */,
 				G10008 /* Settings */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		G10010 /* Admin */ = {
+			isa = PBXGroup;
+			children = (
+				B10024 /* AdminDashboardView.swift */,
+			);
+			path = Admin;
 			sourceTree = "<group>";
 		};
 		G10005 /* Dashboard */ = {
@@ -417,6 +434,9 @@
 				A10015 /* ScheduleView.swift */,
 				A10016 /* RemoteControlView.swift */,
 				A10017 /* SettingsView.swift */,
+				A10022 /* FirebaseAuthService.swift */,
+				A10023 /* LoginView.swift */,
+				A10024 /* AdminDashboardView.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
