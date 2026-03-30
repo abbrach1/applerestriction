@@ -104,6 +104,14 @@ struct SettingsView: View {
                 // About
                 Section("About") {
                     HStack {
+                        Text("App")
+                        Spacer()
+                        Text("AB Brachfeld Kosher iPhone Filter")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+
+                    HStack {
                         Text("Version")
                         Spacer()
                         Text("1.0.0")
@@ -111,11 +119,10 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Text("Frameworks")
+                        Text("Developer")
                         Spacer()
-                        Text("FamilyControls, ManagedSettings")
+                        Text("AB Brachfeld")
                             .foregroundStyle(.secondary)
-                            .font(.caption)
                     }
                 }
             }

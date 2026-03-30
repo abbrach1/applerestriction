@@ -5,7 +5,7 @@ struct MainTabView: View {
         TabView {
             DashboardView()
                 .tabItem {
-                    Label("Dashboard", systemImage: "gauge.with.dots.needle.33percent")
+                    Label("Home", systemImage: "shield.checkered")
                 }
 
             AppBlockingView()
@@ -28,5 +28,6 @@ struct MainTabView: View {
                     Label("Settings", systemImage: "gear")
                 }
         }
+        .tint(Color(red: 0, green: 0.4, blue: 0.15))
     }
 }
