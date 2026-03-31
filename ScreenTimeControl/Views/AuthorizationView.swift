@@ -17,11 +17,11 @@ struct AuthorizationView: View {
                         .font(.system(size: 80))
                         .foregroundStyle(.white)
 
-                    Text("AB Brachfeld")
+                    Text("B-SAFE")
                         .font(.system(size: 36, weight: .bold))
                         .foregroundStyle(.white)
 
-                    Text("Kosher iPhone Filter")
+                    Text("Kosher Internet Filter")
                         .font(.title2)
                         .fontWeight(.semibold)
                         .foregroundStyle(.white.opacity(0.9))
@@ -81,7 +81,7 @@ struct AuthorizationView: View {
 
                 Spacer()
 
-                Text("AB Brachfeld Kosher Filter · Powered by Apple Screen Time")
+                Text("B-SAFE · Powered by Apple Screen Time")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.bottom, 8)

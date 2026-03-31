@@ -22,7 +22,7 @@ struct DashboardView: View {
                 }
                 .padding()
             }
-            .navigationTitle("AB Brachfeld Filter")
+            .navigationTitle("B-SAFE")
             .refreshable {
                 if let config = await syncService.pullSettings() {
                     settingsManager.applyRemoteConfiguration(config)

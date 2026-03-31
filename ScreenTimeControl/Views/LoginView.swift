@@ -25,11 +25,11 @@ struct LoginView: View {
                         .font(.system(size: 72))
                         .foregroundStyle(.white)
 
-                    Text("AB Brachfeld")
+                    Text("B-SAFE")
                         .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(.white)
 
-                    Text("Kosher iPhone Filter")
+                    Text("Kosher Internet Filter")
                         .font(.title3)
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.85))

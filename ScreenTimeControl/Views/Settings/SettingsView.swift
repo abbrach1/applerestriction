@@ -124,7 +124,7 @@ struct SettingsView: View {
                     HStack {
                         Text("App")
                         Spacer()
-                        Text("AB Brachfeld Kosher iPhone Filter")
+                        Text("B-SAFE")
                             .foregroundStyle(.secondary)
                             .font(.caption)
                     }
@@ -139,7 +139,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Developer")
                         Spacer()
-                        Text("AB Brachfeld")
+                        Text("Aryeh Brachfeld")
                             .foregroundStyle(.secondary)
                     }
                 }
