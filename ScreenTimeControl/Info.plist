@@ -46,6 +46,11 @@
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>com.abbrachfeld.screentimecontrolabbrach.dnscheck</string>
+        <string>com.abbrachfeld.screentimecontrolabbrach.adminpoll</string>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
     </array>
 </dict>
 </plist>
