@@ -14,6 +14,7 @@ class ScreenTimeSettingsManager: ObservableObject {
     private let store = ManagedSettingsStore()
 
     @Published var selectedAppsToBlock = FamilyActivitySelection()
+    @Published var selectedAppsAlwaysAllowed = FamilyActivitySelection()
     @Published var configuration = ScreenTimeConfiguration()
     @Published var isDowntimeActive: Bool = false
 

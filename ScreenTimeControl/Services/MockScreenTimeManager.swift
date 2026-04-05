@@ -41,6 +41,7 @@ class MockScreenTimeSettingsManager: ObservableObject {
     @Published var isDowntimeActive: Bool = false
     @Published var blockedAppCount: Int = 0
     @Published var blockedCategoryCount: Int = 0
+    @Published var selectedAppsAlwaysAllowed: Int = 0
 
     func applyAppRestrictions() {
         print("[SIMULATOR] Would apply app restrictions")
