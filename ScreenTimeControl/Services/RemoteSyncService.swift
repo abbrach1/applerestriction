@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import UIKit
 import UserNotifications
+import Network
 
 /// Syncs Screen Time settings with Firebase Realtime Database for remote control.
 ///
@@ -20,6 +21,7 @@ class RemoteSyncService: ObservableObject {
     @Published var pendingCommands: [RemoteCommand] = []
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
+    @Published var isOnline: Bool = true
     @Published var pendingWebsites: [String: String] = [:]       // [pushKey: domain]
     @Published var pendingApps: [String: RecommendedApp] = [:]   // [pushKey: app]
 
@@ -34,7 +36,33 @@ class RemoteSyncService: ObservableObject {
     private var deviceId: String { DeviceInfo.current.id }
     private var pollTimer: Timer?
 
+    // Connectivity + backoff
+    private let pathMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "bsafe.networkMonitor", qos: .utility)
+    private var consecutiveFailures = 0
+    private static let baseInterval: TimeInterval = 30
+    private static let maxInterval: TimeInterval = 300   // 5 min cap
+
     private init() {}
+
+    // MARK: - Network Monitoring
+
+    /// Start watching connectivity. Call once at app launch alongside startPolling().
+    func startNetworkMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let wasOnline = self.isOnline
+                self.isOnline = (path.status == .satisfied)
+                // Reconnected — reset backoff and sync immediately
+                if !wasOnline && self.isOnline {
+                    self.consecutiveFailures = 0
+                    await self.pollAndExecute()
+                }
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
+    }
 
     // MARK: - Child Device Registration
 
@@ -204,16 +232,12 @@ class RemoteSyncService: ObservableObject {
 
     // MARK: - Polling
 
-    /// Child device: start polling Firebase for new commands
-    func startPolling(interval: TimeInterval = 10) {
+    /// Child device: start polling Firebase. Base interval is 30 s; backs off
+    /// exponentially on failure up to 5 min. Pauses entirely when offline.
+    func startPolling() {
         stopPolling()
-        // Apply latest saved settings immediately, then keep polling for commands
         Task { await manualSync() }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.pollAndExecute()
-            }
-        }
+        scheduleNextPoll()
     }
 
     func stopPolling() {
@@ -221,23 +245,51 @@ class RemoteSyncService: ObservableObject {
         pollTimer = nil
     }
 
-    private func pollAndExecute() async {
-        let commands = await checkForCommands()
-        for command in commands {
-            await executeCommand(command)
+    private func scheduleNextPoll() {
+        let interval = currentInterval()
+        pollTimer?.invalidate()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.pollAndExecute()
+                self.scheduleNextPoll()   // reschedule after each tick (interval may have changed)
+            }
         }
+    }
+
+    /// Exponential backoff: 30s base, doubles per failure, caps at 5 min.
+    private func currentInterval() -> TimeInterval {
+        guard consecutiveFailures > 0 else { return Self.baseInterval }
+        let backed = Self.baseInterval * pow(2.0, Double(min(consecutiveFailures - 1, 4)))
+        return min(backed, Self.maxInterval)
+    }
+
+    private func pollAndExecute() async {
+        // Skip entirely when offline — NWPathMonitor will trigger a sync on reconnect
+        guard isOnline else { return }
+
+        let commands = await checkForCommands()
+        for command in commands { await executeCommand(command) }
+
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
         async let websitesFetch: Void = loadPendingWebsites()
         async let appsFetch: Void = loadPendingApps()
         async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
         let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
+
         if let config = fetchedConfig {
+            consecutiveFailures = 0   // successful response — reset backoff
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
             await checkDNSTamper(config: config, uid: user.uid, idToken: token)
+            lastSyncDate = Date()
+            syncError = nil
+        } else {
+            consecutiveFailures += 1
+            syncError = "Sync failed — retrying in \(Int(currentInterval()))s"
         }
-        lastSyncDate = Date()
     }
 
     // MARK: - Notifications
@@ -327,9 +379,7 @@ class RemoteSyncService: ObservableObject {
     /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
     func manualSync() async {
         let commands = await checkForCommands()
-        for command in commands {
-            await executeCommand(command)
-        }
+        for command in commands { await executeCommand(command) }
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
@@ -338,9 +388,11 @@ class RemoteSyncService: ObservableObject {
         async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
         let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
         if let fetchedConfig {
+            consecutiveFailures = 0
+            syncError = nil
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(fetchedConfig)
+            lastSyncDate = Date()
         }
-        lastSyncDate = Date()
     }
 
     /// Load the admin-saved ScreenTimeConfiguration for a user from Firebase

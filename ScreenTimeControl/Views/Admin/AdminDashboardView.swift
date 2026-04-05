@@ -319,6 +319,10 @@ struct AdminDashboardView: View {
                                     Text("Online")
                                         .font(.caption2)
                                         .foregroundStyle(.green)
+                                } else if !user.lastSeen.isEmpty {
+                                    Text(relativeLastSeen(user.lastSeen))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1460,6 +1464,18 @@ struct CommandRow: View {
             }
         }
     }
+}
+
+// MARK: - Helpers
+
+private func relativeLastSeen(_ iso: String) -> String {
+    guard let date = ISO8601DateFormatter().date(from: iso) else { return "Offline" }
+    let mins = Int(-date.timeIntervalSinceNow / 60)
+    if mins < 2  { return "Just now" }
+    if mins < 60 { return "\(mins)m ago" }
+    let hrs = mins / 60
+    if hrs < 24  { return "\(hrs)h ago" }
+    return "\(hrs / 24)d ago"
 }
 
 // MARK: - Models

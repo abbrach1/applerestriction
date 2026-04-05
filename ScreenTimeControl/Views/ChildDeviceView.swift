@@ -71,6 +71,28 @@ struct ChildDeviceView: View {
 
                 // Sync
                 Section {
+                    // Offline / error banner
+                    if !syncService.isOnline {
+                        HStack(spacing: 8) {
+                            Image(systemName: "wifi.slash")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Device is offline")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Restrictions remain active. Syncing when reconnected.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    } else if let err = syncService.syncError {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.yellow)
+                            Text(err)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
                     if let last = syncService.lastSyncDate {
                         LabeledContent("Last Sync", value: last.formatted(.relative(presentation: .named)))
                             .font(.caption)
@@ -90,15 +112,21 @@ struct ChildDeviceView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Color(red: 0, green: 0.4, blue: 0.15))
+                        .background(syncService.isOnline
+                                    ? Color(red: 0, green: 0.4, blue: 0.15)
+                                    : Color.gray)
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    .disabled(isRefreshing)
+                    .disabled(isRefreshing || !syncService.isOnline)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                 } header: { Text("Sync") }
-                footer: { Text("Settings update automatically every 10 seconds.") }
+                footer: {
+                    Text(syncService.isOnline
+                         ? "Settings update automatically every 30 seconds."
+                         : "Will sync automatically when back online.")
+                }
 
                 // Pending website approvals from admin
                 if !syncService.pendingWebsites.isEmpty {

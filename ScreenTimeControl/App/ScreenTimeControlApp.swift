@@ -45,6 +45,7 @@ struct ScreenTimeControlApp: App {
                     .environmentObject(settingsManager)
                     .task {
                         syncService.requestNotificationPermission()
+                        syncService.startNetworkMonitor()
                         if let user = auth.currentUser {
                             let token = await auth.freshToken() ?? user.idToken
                             await syncService.registerDevice(uid: user.uid, email: user.email, idToken: token)
