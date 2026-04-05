@@ -415,6 +415,9 @@ struct WebsiteTab: View {
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
     @State private var newDomain = ""
+    @State private var newPendingDomain = ""
+    @State private var isSendingDomain = false
+    @State private var pendingWebsites: [String: String] = [:]  // [pushKey: domain]
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -535,6 +538,41 @@ struct WebsiteTab: View {
                 }
             }
 
+            // Send a specific website to the child's device
+            Section {
+                HStack {
+                    TextField("domain (e.g. amazon.com)", text: $newPendingDomain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    Button {
+                        Task { await sendWebsiteToDevice() }
+                    } label: {
+                        if isSendingDomain { ProgressView() }
+                        else { Text("Send") }
+                    }
+                    .disabled(newPendingDomain.trimmingCharacters(in: .whitespaces).isEmpty || isSendingDomain)
+                }
+
+                if !pendingWebsites.isEmpty {
+                    ForEach(Array(pendingWebsites), id: \.key) { pushKey, domain in
+                        HStack {
+                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.orange)
+                            Text(domain).font(.subheadline)
+                            Spacer()
+                            Button("Remove", role: .destructive) {
+                                Task { await removePendingWebsite(pushKey: pushKey) }
+                            }
+                            .font(.caption)
+                        }
+                    }
+                }
+            } header: {
+                Text("Send Website to Device")
+            } footer: {
+                Text("Type a domain and tap Send. The child will see it in B-SAFE and can add it to their whitelist with one tap.")
+            }
+
             Section {
                 ApplyButton(label: "Apply Website Settings",
                             icon: "globe",
@@ -548,6 +586,55 @@ struct WebsiteTab: View {
                 }
             }
         }
+        .task { await loadPendingWebsites() }
+    }
+
+    private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
+    private func cleanDomain(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "www.", with: "")
+            .components(separatedBy: "/").first ?? raw
+    }
+
+    private func loadPendingWebsites() async {
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)") else { return }
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            pendingWebsites = dict
+        }
+    }
+
+    private func sendWebsiteToDevice() async {
+        let domain = cleanDomain(newPendingDomain)
+        guard !domain.isEmpty else { return }
+        isSendingDomain = true
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)"),
+              let body = try? JSONSerialization.data(withJSONObject: domain) else {
+            isSendingDomain = false; return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        _ = try? await URLSession.shared.data(for: req)
+        newPendingDomain = ""
+        isSendingDomain = false
+        await loadPendingWebsites()
+    }
+
+    private func removePendingWebsite(pushKey: String) async {
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites/\(pushKey).json?auth=\(token)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        pendingWebsites.removeValue(forKey: pushKey)
     }
 }
 

@@ -99,6 +99,22 @@ struct ChildDeviceView: View {
                 } header: { Text("Sync") }
                 footer: { Text("Settings update automatically every 10 seconds.") }
 
+                // Pending website approvals from admin
+                if !syncService.pendingWebsites.isEmpty {
+                    Section {
+                        ForEach(Array(syncService.pendingWebsites), id: \.key) { pushKey, domain in
+                            PendingWebsiteRow(pushKey: pushKey, domain: domain)
+                                .environmentObject(auth)
+                                .environmentObject(syncService)
+                                .environmentObject(settingsManager)
+                        }
+                    } header: {
+                        Label("Website Requests from Admin", systemImage: "globe.badge.exclamationmark")
+                    } footer: {
+                        Text("Admin wants to add these sites to your whitelist. Tap 'Add to Whitelist' — if the site doesn't appear in the picker, tap 'Visit Site' first, then try again.")
+                    }
+                }
+
                 // Send app list to admin for review
                 Section {
                     if let msg = listSentMessage {
@@ -691,6 +707,172 @@ struct WebsiteSetupSheet: View {
         savedMessage = nil
     }
 }
+
+// MARK: - Pending Website Row
+
+struct PendingWebsiteRow: View {
+    let pushKey: String
+    let domain: String
+    @EnvironmentObject var auth: FirebaseAuthService
+    @EnvironmentObject var syncService: RemoteSyncService
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+
+    @State private var showPicker = false
+    @State private var showSafari = false
+    @State private var isAdding = false
+    @State private var added = false
+    #if !targetEnvironment(simulator)
+    @State private var pickerSelection = FamilyActivitySelection()
+    #endif
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "globe")
+                    .foregroundStyle(.blue)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(domain)
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("Admin wants to add this to your whitelist")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if added {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
+
+            HStack(spacing: 8) {
+                // Visit site first (so it shows up in picker)
+                Button {
+                    showSafari = true
+                } label: {
+                    Label("Visit Site", systemImage: "safari")
+                        .font(.caption).fontWeight(.medium)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundStyle(.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                // Open picker to add the token
+                Button {
+                    showPicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        if isAdding { ProgressView().scaleEffect(0.7) }
+                        else { Image(systemName: "plus.circle.fill") }
+                        Text("Add to Whitelist")
+                            .fontWeight(.medium)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Color.green.opacity(0.12))
+                    .foregroundStyle(.green)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .disabled(isAdding || added)
+            }
+        }
+        .padding(.vertical, 4)
+        #if !targetEnvironment(simulator)
+        .sheet(isPresented: $showSafari) {
+            SafariView(url: URL(string: "https://\(domain)") ?? URL(string: "https://apple.com")!)
+        }
+        .sheet(isPresented: $showPicker, onDismiss: {
+            Task { await mergeAndSave() }
+        }) {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    Text("Find and select \(domain) in the list below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal).padding(.vertical, 6)
+                    FamilyActivityPicker(selection: $pickerSelection)
+                }
+                .navigationTitle("Add \(domain)")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showPicker = false }
+                    }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            pickerSelection = FamilyActivitySelection()
+                            showPicker = false
+                        }
+                    }
+                }
+            }
+        }
+        #endif
+    }
+
+    private func mergeAndSave() async {
+        #if !targetEnvironment(simulator)
+        guard !pickerSelection.webDomainTokens.isEmpty else { return }
+        isAdding = true
+
+        // Load existing whitelist selection
+        var merged = FamilyActivitySelection()
+        if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
+           let data = Data(base64Encoded: base64),
+           let existing = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
+            merged = existing
+        }
+
+        // Merge new domain tokens into existing whitelist
+        merged.webDomainTokens.formUnion(pickerSelection.webDomainTokens)
+        merged.categoryTokens.formUnion(pickerSelection.categoryTokens)
+
+        // Save merged selection locally
+        if let data = try? JSONEncoder().encode(merged) {
+            UserDefaults.standard.set(data.base64EncodedString(), forKey: "screentime.websiteSelection")
+        }
+
+        // Apply immediately
+        settingsManager.applyWebsiteRestrictions()
+
+        // Update Firebase setup info
+        if let user = auth.currentUser {
+            let token = await auth.freshToken() ?? user.idToken
+            let report: [String: Any] = [
+                "siteCount": merged.webDomainTokens.count,
+                "categoryCount": merged.categoryTokens.count,
+                "timestamp": Date().timeIntervalSince1970 * 1000
+            ]
+            if let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/websiteSetup.json?auth=\(token)"),
+               let body = try? JSONSerialization.data(withJSONObject: report) {
+                var req = URLRequest(url: url)
+                req.httpMethod = "PUT"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = body
+                _ = try? await URLSession.shared.data(for: req)
+            }
+        }
+
+        // Remove this domain from pending list
+        await syncService.removePendingWebsite(pushKey: pushKey)
+
+        isAdding = false
+        added = true
+        #endif
+    }
+}
+
+// MARK: - Safari View
+
+#if !targetEnvironment(simulator)
+import SafariServices
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+#endif
 
 // MARK: - Status Row
 

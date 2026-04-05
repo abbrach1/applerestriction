@@ -19,6 +19,7 @@ class RemoteSyncService: ObservableObject {
     @Published var pendingCommands: [RemoteCommand] = []
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
+    @Published var pendingWebsites: [String: String] = [:]  // [pushKey: domain]
 
     /// Firebase Realtime Database URL
     private static let defaultFirebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
@@ -223,13 +224,35 @@ class RemoteSyncService: ObservableObject {
         for command in commands {
             await executeCommand(command)
         }
-        // Always re-apply latest settings from Firebase, not just when a command fires
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        if let config = await loadUserSettings(uid: user.uid, idToken: token) {
-            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
-        }
+        async let settingsTask: () = {
+            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
+                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+            }
+        }()
+        async let websitesTask: () = loadPendingWebsites()
+        _ = await (settingsTask, websitesTask)
         lastSyncDate = Date()
+    }
+
+    func loadPendingWebsites() async {
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        guard let url = URL(string: "\(firebaseURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)") else { return }
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            pendingWebsites = dict
+        } else {
+            pendingWebsites = [:]
+        }
+    }
+
+    func removePendingWebsite(pushKey: String) async {
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        try? await firebaseDelete(path: "users/\(user.uid)/pendingWebsites/\(pushKey)", idToken: token)
+        pendingWebsites.removeValue(forKey: pushKey)
     }
 
     /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
@@ -238,12 +261,15 @@ class RemoteSyncService: ObservableObject {
         for command in commands {
             await executeCommand(command)
         }
-        // Also pull and apply the latest saved settings directly
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        if let config = await loadUserSettings(uid: user.uid, idToken: token) {
-            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
-        }
+        async let settingsTask: () = {
+            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
+                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+            }
+        }()
+        async let websitesTask: () = loadPendingWebsites()
+        _ = await (settingsTask, websitesTask)
         lastSyncDate = Date()
     }
 
