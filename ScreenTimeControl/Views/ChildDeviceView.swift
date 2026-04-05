@@ -18,6 +18,8 @@ struct ChildDeviceView: View {
     @State private var isSendingList = false
     @State private var listSentMessage: String?
     @State private var contentBlockerEnabled: Bool = true  // assume enabled until checked
+    @State private var isEditingName = false
+    @State private var nameInput = ""
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -48,13 +50,20 @@ struct ChildDeviceView: View {
                             Circle()
                                 .fill(Color(red: 0, green: 0.4, blue: 0.15).opacity(0.12))
                                 .frame(width: 56, height: 56)
-                            Image(systemName: "iphone.gen3")
+                            Image(systemName: "person.fill")
                                 .font(.title2)
                                 .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(auth.currentUser?.email ?? "")
+                            let name = syncService.displayName.isEmpty
+                                ? (auth.currentUser?.email ?? "")
+                                : syncService.displayName
+                            Text(name)
                                 .font(.subheadline).fontWeight(.semibold)
+                            if !syncService.displayName.isEmpty {
+                                Text(auth.currentUser?.email ?? "")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             Text(UIDevice.current.name)
                                 .font(.caption).foregroundStyle(.secondary)
                             HStack(spacing: 4) {
@@ -63,8 +72,28 @@ struct ChildDeviceView: View {
                                     .font(.caption2).foregroundStyle(.green)
                             }
                         }
+                        Spacer()
+                        Button {
+                            nameInput = syncService.displayName
+                            isEditingName = true
+                        } label: {
+                            Image(systemName: "pencil.circle")
+                                .font(.title3)
+                                .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15).opacity(0.6))
+                        }
                     }
                     .padding(.vertical, 4)
+                }
+                .alert("Your Name", isPresented: $isEditingName) {
+                    TextField("Name (e.g. David)", text: $nameInput)
+                        .autocorrectionDisabled()
+                    Button("Save") {
+                        let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
+                        Task { await syncService.setDisplayName(trimmed) }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This name is shown to your admin.")
                 }
 
                 // Active restrictions

@@ -91,6 +91,7 @@ class FirebaseAuthService: ObservableObject {
 struct FirebaseUser: Codable {
     let uid: String
     let email: String
+    var displayName: String = ""
 
     // Backward compat: views that reference user.idToken get an empty string;
     // actual tokens always come from FirebaseAuthService.freshToken()

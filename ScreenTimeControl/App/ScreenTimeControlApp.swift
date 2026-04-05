@@ -2,12 +2,26 @@ import SwiftUI
 import FirebaseCore
 import FirebaseDatabase
 import BackgroundTasks
+import UserNotifications
 
 #if !targetEnvironment(simulator)
 import FamilyControls
 #endif
 
 private let bgTaskID = "com.abbrachfeld.screentimecontrolabbrach.dnscheck"
+
+// Allows local notifications to appear even when the app is in the foreground.
+private class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
+    }
+}
+
+private let notificationDelegate = NotificationDelegate()
 
 @main
 struct ScreenTimeControlApp: App {
@@ -19,6 +33,7 @@ struct ScreenTimeControlApp: App {
     init() {
         FirebaseApp.configure()
         Database.database().isPersistenceEnabled = true
+        UNUserNotificationCenter.current().delegate = notificationDelegate
         registerBackgroundTask()
     }
 

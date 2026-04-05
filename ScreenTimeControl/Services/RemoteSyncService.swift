@@ -21,6 +21,7 @@ class RemoteSyncService: ObservableObject {
     @Published var isOnline: Bool = true
     @Published var pendingWebsites: [String: String] = [:]
     @Published var pendingApps: [String: RecommendedApp] = [:]
+    @Published var displayName: String = ""
 
     // Keep for legacy compatibility
     @Published var isPaired: Bool = false
@@ -198,8 +199,14 @@ class RemoteSyncService: ObservableObject {
     // MARK: - Device Registration
 
     func registerDevice(uid: String, email: String, idToken: String) async {
+        // Load existing displayName first so we don't overwrite it
+        let existing = try? await dbRef.child("users/\(uid)/info/displayName").getData()
+        let savedName = existing?.value as? String ?? ""
+        if !savedName.isEmpty { displayName = savedName }
+
         let info: [String: Any] = [
             "email": email,
+            "displayName": savedName,
             "deviceName": DeviceInfo.current.name,
             "deviceModel": DeviceInfo.current.model,
             "deviceId": DeviceInfo.current.id,
@@ -208,6 +215,12 @@ class RemoteSyncService: ObservableObject {
         ]
         try? await dbRef.child("users/\(uid)/info").setValue(info)
         isPaired = true
+    }
+
+    func setDisplayName(_ name: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        displayName = name
+        try? await dbRef.child("users/\(uid)/info/displayName").setValue(name)
     }
 
     // MARK: - Manual Sync (refresh button)

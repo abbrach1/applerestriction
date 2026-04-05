@@ -24,6 +24,7 @@ class AdminViewModel: ObservableObject {
                 return ManagedUser(
                     uid: uid,
                     email: email,
+                    displayName: info["displayName"] as? String ?? "",
                     deviceName: info["deviceName"] as? String ?? "Unknown Device",
                     isOnline: info["isOnline"] as? Bool ?? false,
                     lastSeen: info["lastSeen"] as? String ?? ""
@@ -307,10 +308,10 @@ struct AdminDashboardView: View {
                                     .fill(user.isOnline ? Color.green : Color.gray.opacity(0.4))
                                     .frame(width: 10, height: 10)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(user.email)
+                                    Text(user.primaryLabel)
                                         .font(.subheadline)
                                         .fontWeight(.medium)
-                                    Text(user.deviceName)
+                                    Text(user.secondaryLabel)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -371,9 +372,9 @@ struct AdminUserControlView: View {
                     .font(.title2)
                     .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(user.email)
+                    Text(user.primaryLabel)
                         .font(.subheadline).fontWeight(.medium)
-                    Text(user.deviceName)
+                    Text(user.secondaryLabel)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -460,7 +461,7 @@ struct AdminUserControlView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
         }
-        .navigationTitle(user.email.components(separatedBy: "@").first ?? user.email)
+        .navigationTitle(user.primaryLabel)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             let token = await auth.freshToken() ?? ""
@@ -1546,8 +1547,12 @@ private func relativeLastSeen(_ iso: String) -> String {
 struct ManagedUser: Identifiable {
     let uid: String
     let email: String
+    let displayName: String
     let deviceName: String
     let isOnline: Bool
     let lastSeen: String
     var id: String { uid }
+
+    var primaryLabel: String { displayName.isEmpty ? email : displayName }
+    var secondaryLabel: String { displayName.isEmpty ? deviceName : email }
 }
