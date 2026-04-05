@@ -43,6 +43,7 @@ class AdminUserViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var savedSection: String?
     @Published var lastError: String?
+    @Published var appListReport: AppListReport?
 
     #if !targetEnvironment(simulator)
     @Published var appSelection = FamilyActivitySelection()
@@ -132,25 +133,51 @@ class AdminUserViewModel: ObservableObject {
         isLoading = true
         lastError = nil
 
-        guard let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else {
-            isLoading = false; return
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.loadSettings(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadAppList(uid: uid, idToken: idToken) }
         }
+
+        isLoading = false
+    }
+
+    private func loadSettings(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else { return }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             if let http = response as? HTTPURLResponse, http.statusCode == 401 {
                 lastError = "Session expired — try signing out and back in"
-                isLoading = false; return
+                return
             }
             if let remote = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
                 config = remote
                 saveLocally(uid: uid)
                 deserializeAppSelection()
             }
-            // If decode fails (null or empty), local copy already shown — no reset
         } catch {
             lastError = "Could not reach Firebase: \(error.localizedDescription)"
         }
-        isLoading = false
+    }
+
+    func loadAppList(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/appList.json?auth=\(idToken)") else { return }
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let report = try? decoder.decode(AppListReport.self, from: data) {
+            appListReport = report
+        }
+    }
+
+    func markAppListReviewed(uid: String, idToken: String) async {
+        guard var report = appListReport else { return }
+        report.reviewed = true
+        appListReport = report
+        guard let encoded = try? encoder.encode(report),
+              let url = URL(string: "\(dbURL)/users/\(uid)/appList.json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     // MARK: - Save & Command
@@ -572,6 +599,69 @@ struct AppsTab: View {
 
     var body: some View {
         List {
+            // App Review Request (child-submitted)
+            if let report = vm.appListReport {
+                Section {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(report.reviewed ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
+                                .frame(width: 40, height: 40)
+                            Image(systemName: report.reviewed ? "checkmark.circle.fill" : "clock.badge.exclamationmark.fill")
+                                .foregroundStyle(report.reviewed ? .green : .orange)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(report.reviewed ? "App List Reviewed" : "Pending App Review")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("\(report.appCount) apps · \(report.categoryCount) categories")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(report.timestamp.formatted(.relative(presentation: .named)))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if !report.reviewed {
+                            Circle().fill(.orange).frame(width: 8, height: 8)
+                        }
+                    }
+                    .padding(.vertical, 2)
+
+                    if !report.reviewed {
+                        Button {
+                            Task {
+                                let token = await auth.freshToken() ?? ""
+                                await vm.markAppListReviewed(uid: user.uid, idToken: token)
+                            }
+                        } label: {
+                            Label("Mark as Reviewed", systemImage: "checkmark.circle")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                } header: {
+                    Text("App Review Request")
+                } footer: {
+                    Text("Child sent their app list for review. After reviewing, use the picker below to block specific apps.")
+                }
+            }
+
+            Section {
+                Toggle(isOn: $vm.config.blockNewApps) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Block New App Installs")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Prevents the device from installing any new apps")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "xmark.app.fill").foregroundStyle(.orange)
+                    }
+                }
+            } header: {
+                Text("App Installations")
+            } footer: {
+                Text("When enabled, the child must send their app list for your review before you can approve new apps.")
+            }
+
             Section {
                 Button {
                     showingPicker = true
@@ -595,9 +685,9 @@ struct AppsTab: View {
                     }
                 }
             } header: {
-                Text("Individual App Blocking")
+                Text("Block Specific Apps")
             } footer: {
-                Text("All apps are allowed by default. Selected apps will show a blocking screen on the device.")
+                Text("All apps are allowed by default. Selected apps will show a blocking screen on the device. Note: this picker shows your device's apps — use the child-side Admin Setup to pick from the child's installed apps.")
             }
 
             Section("Emergency Lock") {
@@ -649,6 +739,10 @@ struct AppsTab: View {
             }
         }
         #endif
+        .task {
+            let token = await auth.freshToken() ?? ""
+            await vm.loadAppList(uid: user.uid, idToken: token)
+        }
     }
 }
 
@@ -698,6 +792,7 @@ struct CommandsTab: View {
                     Task {
                         // Reset config to defaults
                         vm.config.isLocked = false
+                        vm.config.blockNewApps = false
                         vm.config.blockedWebsites = []
                         vm.config.allowedWebsites = []
                         vm.config.websiteFilterMode = .blacklist

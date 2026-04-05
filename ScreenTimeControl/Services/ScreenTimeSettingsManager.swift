@@ -144,6 +144,7 @@ class ScreenTimeSettingsManager: ObservableObject {
     func unlockAll() {
         store.clearAllSettings()
         configuration.downtimeEnabled = false
+        configuration.blockNewApps = false
         isDowntimeActive = false
         downtimeTimer?.invalidate()
         selectedAppsToBlock = FamilyActivitySelection()
@@ -212,6 +213,9 @@ class ScreenTimeSettingsManager: ObservableObject {
             selectedAppsToBlock = FamilyActivitySelection()
         }
 
+        // App installation blocking
+        store.application.denyAppInstallation = config.blockNewApps
+
         // App restrictions first, website restrictions last (so website blocking isn't overwritten)
         applyAppRestrictions()
         applyWebsiteRestrictions()
@@ -233,6 +237,9 @@ class ScreenTimeSettingsManager: ObservableObject {
     }
 
     private func restoreActiveRestrictions() {
+        // Restore app installation block
+        store.application.denyAppInstallation = configuration.blockNewApps
+
         if configuration.downtimeEnabled {
             startDowntimeTimer()
             checkAndApplyDowntime()

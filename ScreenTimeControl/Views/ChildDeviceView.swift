@@ -11,6 +11,12 @@ struct ChildDeviceView: View {
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @State private var isRefreshing = false
     @State private var showAdminSetup = false
+    @State private var showSendAppList = false
+    @State private var isSendingList = false
+    @State private var listSentMessage: String?
+    #if !targetEnvironment(simulator)
+    @State private var appListSelection = FamilyActivitySelection()
+    #endif
 
     var body: some View {
         let config = settingsManager.configuration
@@ -56,6 +62,9 @@ struct ChildDeviceView: View {
                     StatusRow(icon: "moon.fill", label: "Downtime",
                               value: downtimeStatus(config),
                               active: config.downtimeEnabled, color: .purple)
+                    StatusRow(icon: "xmark.app.fill", label: "Block New Installs",
+                              value: config.blockNewApps ? "On" : "Off",
+                              active: config.blockNewApps, color: .orange)
                 }
 
                 // Sync
@@ -89,6 +98,35 @@ struct ChildDeviceView: View {
                 } header: { Text("Sync") }
                 footer: { Text("Settings update automatically every 10 seconds.") }
 
+                // Send app list to admin for review
+                Section {
+                    if let msg = listSentMessage {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            Text(msg).foregroundStyle(.green).font(.subheadline)
+                        }
+                    }
+                    Button {
+                        showSendAppList = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Send App List to Admin")
+                                    .font(.subheadline).fontWeight(.medium)
+                                    .foregroundStyle(.primary)
+                                Text("Select your apps so admin can review and approve them")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: { Text("App Review") }
+                  footer: { Text("If new app installs are blocked, send your app list to request admin approval.") }
+
                 Section {
                     Button("Sign Out", role: .destructive) { auth.signOut() }
                     // Hidden admin setup — tap 5 times on version label to unlock
@@ -105,7 +143,72 @@ struct ChildDeviceView: View {
                     .environmentObject(syncService)
                     .environmentObject(settingsManager)
             }
+            #if !targetEnvironment(simulator)
+            .sheet(isPresented: $showSendAppList) {
+                NavigationStack {
+                    VStack(spacing: 0) {
+                        Text("Select all the apps you have installed. Admin will review and approve your list.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                        FamilyActivityPicker(selection: $appListSelection)
+                    }
+                    .navigationTitle("My Apps")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showSendAppList = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button {
+                                Task {
+                                    showSendAppList = false
+                                    isSendingList = true
+                                    await uploadAppList()
+                                    isSendingList = false
+                                }
+                            } label: {
+                                if isSendingList { ProgressView() }
+                                else { Text("Send") }
+                            }
+                        }
+                    }
+                }
+            }
+            #endif
         }
+    }
+
+    private func uploadAppList() async {
+        #if !targetEnvironment(simulator)
+        guard let user = auth.currentUser else { return }
+        let token = await auth.freshToken() ?? user.idToken
+
+        let report = AppListReport(
+            selectionData: (try? JSONEncoder().encode(appListSelection))?.base64EncodedString() ?? "",
+            appCount: appListSelection.applicationTokens.count,
+            categoryCount: appListSelection.categoryTokens.count,
+            timestamp: Date(),
+            reviewed: false
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(report),
+              let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/appList.json?auth=\(token)") else { return }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
+
+        listSentMessage = "App list sent! (\(report.appCount) apps, \(report.categoryCount) categories)"
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        listSentMessage = nil
+        #endif
     }
 
     // MARK: - Helpers

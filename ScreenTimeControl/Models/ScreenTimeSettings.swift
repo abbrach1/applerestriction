@@ -23,6 +23,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var downtimeEnabled: Bool = false
     var downtimeSchedule: DowntimeSchedule = DowntimeSchedule()
     var isLocked: Bool = false
+    var blockNewApps: Bool = false
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -43,6 +44,7 @@ extension ScreenTimeConfiguration {
         downtimeEnabled   = try c.decodeIfPresent(Bool.self,          forKey: .downtimeEnabled)   ?? false
         downtimeSchedule  = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
         isLocked          = try c.decodeIfPresent(Bool.self,          forKey: .isLocked)          ?? false
+        blockNewApps      = try c.decodeIfPresent(Bool.self,          forKey: .blockNewApps)      ?? false
     }
 }
 
@@ -108,6 +110,27 @@ struct RemoteCommand: Codable, Identifiable {
         case lockDevice
         case unlockAll
         case refreshSettings
+    }
+}
+
+// MARK: - App List Report (child → admin, stored at /users/uid/appList)
+
+struct AppListReport: Codable {
+    var selectionData: String = ""
+    var appCount: Int = 0
+    var categoryCount: Int = 0
+    var timestamp: Date = Date()
+    var reviewed: Bool = false
+}
+
+extension AppListReport {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        selectionData = try c.decodeIfPresent(String.self, forKey: .selectionData) ?? ""
+        appCount      = try c.decodeIfPresent(Int.self,    forKey: .appCount)       ?? 0
+        categoryCount = try c.decodeIfPresent(Int.self,    forKey: .categoryCount)  ?? 0
+        timestamp     = try c.decodeIfPresent(Date.self,   forKey: .timestamp)      ?? Date()
+        reviewed      = try c.decodeIfPresent(Bool.self,   forKey: .reviewed)       ?? false
     }
 }
 
