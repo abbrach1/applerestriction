@@ -161,6 +161,7 @@
 				B10019 /* Info.plist */,
 				B10020 /* ScreenTimeControl.entitlements */,
 				B10021 /* ScreenTimeControl-Simulator.entitlements */,
+				B10041 /* GoogleService-Info.plist */,
 			);
 			path = ScreenTimeControl;
 			sourceTree = "<group>";
@@ -192,7 +193,6 @@
 				B10008 /* MockScreenTimeManager.swift */,
 				B10022 /* FirebaseAuthService.swift */,
 				B10040 /* ContentBlockerService.swift */,
-				B10041 /* GoogleService-Info.plist */,
 			);
 			path = Services;
 			sourceTree = "<group>";
