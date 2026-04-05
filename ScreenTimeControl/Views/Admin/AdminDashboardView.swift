@@ -91,7 +91,10 @@ struct AdminDashboardView: View {
             .navigationTitle("Managed Devices")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { Task { await vm.loadUsers(idToken: auth.currentUser?.idToken ?? "") } } label: {
+                    Button { Task {
+                    let token = await auth.freshToken() ?? ""
+                    await vm.loadUsers(idToken: token)
+                } } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
@@ -102,7 +105,8 @@ struct AdminDashboardView: View {
                 }
             }
             .task {
-                await vm.loadUsers(idToken: auth.currentUser?.idToken ?? "")
+                let token = await auth.freshToken() ?? ""
+                await vm.loadUsers(idToken: token)
             }
         }
     }
@@ -183,7 +187,8 @@ struct AdminUserControlView: View {
 
     private func send(_ type: RemoteCommand.CommandType) {
         Task {
-            await vm.sendCommand(type, toUID: user.uid, idToken: auth.currentUser?.idToken ?? "")
+            let token = await auth.freshToken() ?? ""
+            await vm.sendCommand(type, toUID: user.uid, idToken: token)
             sent = true
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             sent = false
