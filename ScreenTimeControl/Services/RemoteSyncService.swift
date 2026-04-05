@@ -26,7 +26,7 @@ class RemoteSyncService: ObservableObject {
     @Published var isPaired: Bool = false
     @Published var pendingCommands: [RemoteCommand] = []
 
-    private let dbRef = Database.database().reference()
+    private lazy var dbRef: DatabaseReference = Database.database().reference()
     private var listenerHandles: [(DatabaseReference, DatabaseHandle)] = []
     private var connectedHandle: DatabaseHandle?
 
