@@ -13,7 +13,8 @@ class AdminViewModel: ObservableObject {
         if let (data, _) = try? await URLSession.shared.data(from: url),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             users = dict.compactMap { uid, val in
-                guard let info = val as? [String: Any],
+                guard let userNode = val as? [String: Any],
+                      let info = userNode["info"] as? [String: Any],
                       let email = info["email"] as? String else { return nil }
                 return ManagedUser(
                     uid: uid,
