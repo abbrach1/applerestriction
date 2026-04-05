@@ -172,28 +172,36 @@ class ScreenTimeSettingsManager: ObservableObject {
                 store.shield.webDomainCategories = WebPolicy.all()
             }
         } else {
-            // Whitelist mode: block all content EXCEPT sites selected via child-device picker.
-            // Clear any stale per-domain blocks first.
+            // Whitelist mode
             store.shield.webDomains = nil
 
+            // When the admin has set allowedWebsites remotely, the Safari Content Blocker
+            // enforces the whitelist (block-all + ignore-previous-rules for allowed domains).
+            // ManagedSettings cannot work with plain domain strings — it needs opaque
+            // WebDomainTokens from the on-device FamilyActivityPicker. Setting
+            // webDomainCategories = .all() here would override the content blocker and
+            // block the allowed sites too. So: clear the Screen Time shield and let
+            // the content blocker own whitelist enforcement.
+            if configuration.contentBlockerEnabled && !configuration.allowedWebsites.isEmpty {
+                store.shield.webDomainCategories = nil
+                saveConfiguration()
+                return
+            }
+
+            // On-device picker path: use opaque WebDomainTokens if available
             if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
                let data = Data(base64Encoded: base64),
                let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
                 let webTokens = selection.webDomainTokens
                 let catTokens = selection.categoryTokens
                 if !webTokens.isEmpty {
-                    // Specific websites selected — block everything except those domains
                     store.shield.webDomainCategories = WebPolicy.all(except: webTokens)
                 } else if !catTokens.isEmpty {
-                    // Only category tokens (e.g. user picked "Shopping" not "amazon.com") —
-                    // can't whitelist by category, so allow all to avoid blocking the wrong things
                     store.shield.webDomainCategories = nil
                 } else {
-                    // Empty selection — block everything
                     store.shield.webDomainCategories = WebPolicy.all()
                 }
             } else {
-                // No selection saved yet — block everything until setup is run on device
                 store.shield.webDomainCategories = WebPolicy.all()
             }
         }
