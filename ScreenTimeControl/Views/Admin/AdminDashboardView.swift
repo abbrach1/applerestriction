@@ -407,8 +407,8 @@ struct WebsiteTab: View {
                 Text("Mode")
             } footer: {
                 Text(vm.config.websiteFilterMode == .blacklist
-                     ? "Add sites to the block list. When any sites are listed, ALL web browsing is blocked on the device."
-                     : "All web browsing is blocked on the device. Listed sites are saved for reference.")
+                     ? "Add sites to block. When the list is empty, web browsing is unrestricted."
+                     : "ALL websites are blocked on the device. The list is saved for reference only — per-site exceptions require tokens from the device and cannot be set remotely.")
                     .font(.caption)
             }
 

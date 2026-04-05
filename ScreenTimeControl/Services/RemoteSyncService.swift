@@ -223,6 +223,13 @@ class RemoteSyncService: ObservableObject {
         for command in commands {
             await executeCommand(command)
         }
+        // Always re-apply latest settings from Firebase, not just when a command fires
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        if let config = await loadUserSettings(uid: user.uid, idToken: token) {
+            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+        }
+        lastSyncDate = Date()
     }
 
     /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
