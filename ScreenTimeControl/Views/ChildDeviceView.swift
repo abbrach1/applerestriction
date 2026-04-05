@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import StoreKit
 
 #if !targetEnvironment(simulator)
 import FamilyControls
@@ -890,8 +889,8 @@ struct PendingAppRow: View {
     let app: RecommendedApp
     @EnvironmentObject var syncService: RemoteSyncService
 
-    @State private var showStore = false
     @State private var isDismissing = false
+    @State private var didOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -921,13 +920,18 @@ struct PendingAppRow: View {
             Spacer()
 
             Button {
-                showStore = true
+                // Opens App Store directly to the app page — Face ID → Download
+                // No sheet/popup, no crash. itms-apps:// is the native deep link.
+                if let url = URL(string: "itms-apps://itunes.apple.com/app/id\(app.appStoreID)") {
+                    UIApplication.shared.open(url)
+                    didOpen = true
+                }
             } label: {
-                Text("GET")
+                Text(didOpen ? "OPENED" : "GET")
                     .font(.subheadline).fontWeight(.bold)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(didOpen ? .green : .blue)
                     .padding(.horizontal, 14).padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.12))
+                    .background((didOpen ? Color.green : Color.blue).opacity(0.12))
                     .clipShape(Capsule())
             }
         }
@@ -943,39 +947,9 @@ struct PendingAppRow: View {
                 Label("Dismiss", systemImage: "xmark")
             }
         }
-        .sheet(isPresented: $showStore) {
-            AppStoreSheet(appStoreID: app.appStoreID)
-        }
     }
 }
 
-// MARK: - App Store Sheet (SKStoreProductViewController wrapper)
-
-struct AppStoreSheet: UIViewControllerRepresentable {
-    let appStoreID: String
-    @Environment(\.dismiss) var dismiss
-
-    func makeUIViewController(context: Context) -> SKStoreProductViewController {
-        let vc = SKStoreProductViewController()
-        vc.delegate = context.coordinator
-        vc.loadProduct(withParameters: [
-            SKStoreProductParameterITunesItemIdentifier: appStoreID
-        ], completionBlock: nil)
-        return vc
-    }
-
-    func updateUIViewController(_ uiViewController: SKStoreProductViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(dismiss: dismiss) }
-
-    class Coordinator: NSObject, SKStoreProductViewControllerDelegate {
-        let dismiss: DismissAction
-        init(dismiss: DismissAction) { self.dismiss = dismiss }
-        func productViewControllerDidFinish(_ viewController: SKStoreProductViewController) {
-            dismiss()
-        }
-    }
-}
 
 // MARK: - Safari View
 
