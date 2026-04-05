@@ -31,6 +31,7 @@
 		A10023 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10023 /* LoginView.swift */; };
 		A10024 /* AdminDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10024 /* AdminDashboardView.swift */; };
 		A10030 /* ChildDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10030 /* ChildDeviceView.swift */; };
+		A10050 /* SafeBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10050 /* SafeBrowserView.swift */; };
 		BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -86,6 +87,7 @@
 		B10023 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		B10024 /* AdminDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminDashboardView.swift; sourceTree = "<group>"; };
 		B10030 /* ChildDeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildDeviceView.swift; sourceTree = "<group>"; };
+		B10050 /* SafeBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeBrowserView.swift; sourceTree = "<group>"; };
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		B20002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20003 /* DeviceActivityMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DeviceActivityMonitor.entitlements; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 				G10006 /* AppPicker */,
 				G10007 /* Schedule */,
 				G10008 /* Settings */,
+				B10050 /* SafeBrowserView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -428,6 +431,7 @@
 				A10006 /* ScreenTimeSettingsManager.swift in Sources */,
 				A10007 /* RemoteSyncService.swift in Sources */,
 				A10040 /* ContentBlockerService.swift in Sources */,
+				A10050 /* SafeBrowserView.swift in Sources */,
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,

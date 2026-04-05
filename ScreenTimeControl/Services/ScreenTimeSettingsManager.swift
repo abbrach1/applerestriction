@@ -175,15 +175,12 @@ class ScreenTimeSettingsManager: ObservableObject {
             // Whitelist mode
             store.shield.webDomains = nil
 
-            // When the admin has set allowedWebsites remotely, the Safari Content Blocker
-            // enforces the whitelist (block-all + ignore-previous-rules for allowed domains).
-            // ManagedSettings cannot work with plain domain strings — it needs opaque
-            // WebDomainTokens from the on-device FamilyActivityPicker. Setting
-            // webDomainCategories = .all() here would override the content blocker and
-            // block the allowed sites too. So: clear the Screen Time shield and let
-            // the content blocker own whitelist enforcement.
-            if configuration.contentBlockerEnabled && !configuration.allowedWebsites.isEmpty {
-                store.shield.webDomainCategories = nil
+            // In whitelist mode with remote allowedWebsites: block ALL of Safari/Chrome/etc
+            // via Screen Time. The in-app B-SAFE Browser (WKWebView) is the only way to
+            // browse — it enforces the whitelist in code. No extension to disable, no bypass
+            // since the app itself is protected by the Screen Time PIN.
+            if !configuration.allowedWebsites.isEmpty {
+                store.shield.webDomainCategories = WebPolicy.all()
                 saveConfiguration()
                 return
             }

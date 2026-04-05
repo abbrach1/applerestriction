@@ -24,6 +24,21 @@ struct ChildDeviceView: View {
 
     var body: some View {
         let config = settingsManager.configuration
+        TabView {
+            mainTab(config: config)
+                .tabItem { Label("Home", systemImage: "shield.checkered") }
+
+            if config.websiteFilterMode == .whitelist && !config.allowedWebsites.isEmpty {
+                SafeBrowserView()
+                    .environmentObject(settingsManager)
+                    .tabItem { Label("Browser", systemImage: "globe") }
+            }
+        }
+        .tint(Color(red: 0, green: 0.4, blue: 0.15))
+    }
+
+    @ViewBuilder
+    private func mainTab(config: ScreenTimeConfiguration) -> some View {
         NavigationStack {
             List {
                 // Device identity
@@ -275,8 +290,8 @@ struct ChildDeviceView: View {
                 }
             }
             #endif
-        }
-    }
+        } // end NavigationStack
+    } // end mainTab
 
     private func uploadAppList() async {
         #if !targetEnvironment(simulator)
