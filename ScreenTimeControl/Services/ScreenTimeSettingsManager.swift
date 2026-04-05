@@ -207,6 +207,8 @@ class ScreenTimeSettingsManager: ObservableObject {
 
         if config.isLocked {
             lockAllApps()
+            ContentBlockerService.shared.applyRules(for: config)
+            Task { if config.forceDNS { await ContentBlockerService.shared.enableForcedDNS() } }
             return
         }
 
@@ -236,6 +238,21 @@ class ScreenTimeSettingsManager: ObservableObject {
         // App restrictions first, website restrictions last (so website blocking isn't overwritten)
         applyAppRestrictions()
         applyWebsiteRestrictions()
+
+        // Content blocker (Safari) + DNS
+        if config.contentBlockerEnabled {
+            ContentBlockerService.shared.applyRules(for: config)
+        } else {
+            ContentBlockerService.shared.clearRules()
+        }
+
+        Task {
+            if config.forceDNS {
+                await ContentBlockerService.shared.enableForcedDNS()
+            } else {
+                await ContentBlockerService.shared.disableForcedDNS()
+            }
+        }
     }
 
     // MARK: - Persistence

@@ -574,6 +574,39 @@ struct WebsiteTab: View {
             }
 
             Section {
+                Toggle(isOn: $vm.config.contentBlockerEnabled) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Safari Content Blocker")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Enforces website rules inside Safari using plain domain names")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "safari.fill").foregroundStyle(.blue)
+                    }
+                }
+
+                Toggle(isOn: $vm.config.forceDNS) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Force CleanBrowsing DNS")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Blocks adult & malware domains system-wide (all apps, not just Safari)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
+                    }
+                }
+            } header: {
+                Text("Extra Protection")
+            } footer: {
+                Text("Content Blocker uses admin's allowed/blocked list in Safari. CleanBrowsing DNS works across all apps and can't be bypassed by switching browsers.")
+                    .font(.caption)
+            }
+
+            Section {
                 ApplyButton(label: "Apply Website Settings",
                             icon: "globe",
                             color: .blue,

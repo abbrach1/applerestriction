@@ -111,7 +111,7 @@ struct ChildDeviceView: View {
                     } header: {
                         Label("Website Requests from Admin", systemImage: "globe.badge.exclamationmark")
                     } footer: {
-                        Text("Admin wants to add these sites to your whitelist. Tap 'Add to Whitelist' — if the site doesn't appear in the picker, tap 'Visit Site' first, then try again.")
+                        Text("Tap Allow to instantly add the site to your whitelist. The Safari content blocker updates immediately — no picker required.")
                     }
                 }
 
@@ -721,6 +721,9 @@ struct WebsiteSetupSheet: View {
 }
 
 // MARK: - Pending Website Row
+//
+// One-tap flow: child taps "Allow" → domain added to allowedWebsites in Firebase
+// settings → ContentBlockerService generates new Safari rules → no picker needed.
 
 struct PendingWebsiteRow: View {
     let pushKey: String
@@ -729,174 +732,111 @@ struct PendingWebsiteRow: View {
     @EnvironmentObject var syncService: RemoteSyncService
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
 
-    @State private var showPicker = false
-    @State private var showSafari = false
     @State private var isAdding = false
     @State private var added = false
-    @State private var needsWhitelistMode = false
-    @State private var addResult = ""
-    #if !targetEnvironment(simulator)
-    @State private var pickerSelection = FamilyActivitySelection()
-    #endif
+    @State private var addError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "globe")
-                    .foregroundStyle(.blue)
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(domain)
-                        .font(.subheadline).fontWeight(.medium)
-                    Text("Admin wants to add this to your whitelist")
+        HStack(spacing: 10) {
+            Image(systemName: "globe")
+                .foregroundStyle(.blue)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(domain)
+                    .font(.subheadline).fontWeight(.medium)
+                if let err = addError {
+                    Text(err).font(.caption2).foregroundStyle(.red)
+                } else {
+                    Text(added ? "Added to whitelist" : "Admin wants to allow this site")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer()
-                if added {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                }
             }
+            Spacer()
 
-            if !addResult.isEmpty {
-                Text(addResult)
-                    .font(.caption2)
-                    .foregroundStyle(needsWhitelistMode ? .orange : .green)
-            }
-
-            HStack(spacing: 8) {
-                // Visit site first (so it shows up in picker)
+            if added {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
                 Button {
-                    showSafari = true
+                    Task { await allowDomain() }
                 } label: {
-                    Label("Visit Site", systemImage: "safari")
-                        .font(.caption).fontWeight(.medium)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundStyle(.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                // Open picker to add the token
-                Button {
-                    showPicker = true
-                } label: {
-                    HStack(spacing: 4) {
-                        if isAdding { ProgressView().scaleEffect(0.7) }
-                        else { Image(systemName: "plus.circle.fill") }
-                        Text("Add to Whitelist")
-                            .fontWeight(.medium)
+                    Group {
+                        if isAdding {
+                            ProgressView().scaleEffect(0.8)
+                        } else {
+                            Label("Allow", systemImage: "plus.circle.fill")
+                                .font(.caption).fontWeight(.semibold)
+                        }
                     }
-                    .font(.caption)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Color.green.opacity(0.12))
                     .foregroundStyle(.green)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .disabled(isAdding || added)
+                .disabled(isAdding)
             }
         }
         .padding(.vertical, 4)
-        #if !targetEnvironment(simulator)
-        .sheet(isPresented: $showSafari) {
-            SafariView(url: URL(string: "https://\(domain)") ?? URL(string: "https://apple.com")!)
-        }
-        .sheet(isPresented: $showPicker) {
-            NavigationStack {
-                VStack(spacing: 0) {
-                    Text("Find and select \"\(domain)\" in the list below, then tap Add.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal).padding(.vertical, 8)
-                    FamilyActivityPicker(selection: $pickerSelection)
-                }
-                .navigationTitle("Add \(domain)")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            showPicker = false
-                            Task { await mergeAndSave() }
-                        }
-                    }
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            pickerSelection = FamilyActivitySelection()
-                            showPicker = false
-                        }
-                    }
-                }
-            }
-        }
-        #endif
     }
 
-    private func mergeAndSave() async {
-        #if !targetEnvironment(simulator)
-        let hasWebTokens = !pickerSelection.webDomainTokens.isEmpty
-        let hasCategoryTokens = !pickerSelection.categoryTokens.isEmpty
-        guard hasWebTokens || hasCategoryTokens else { return }
+    /// Add domain to allowedWebsites in Firebase config → content blocker auto-updates.
+    private func allowDomain() async {
         isAdding = true
+        addError = nil
 
-        // Load existing whitelist selection
-        var merged = FamilyActivitySelection()
-        if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
-           let data = Data(base64Encoded: base64),
-           let existing = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
-            merged = existing
+        guard let user = auth.currentUser else {
+            addError = "Not signed in"
+            isAdding = false; return
+        }
+        let token = await auth.freshToken() ?? user.idToken
+        let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
+        // Fetch current settings from Firebase
+        guard let getURL = URL(string: "\(dbURL)/users/\(user.uid)/settings.json?auth=\(token)"),
+              let (data, _) = try? await URLSession.shared.data(from: getURL) else {
+            addError = "Network error"
+            isAdding = false; return
         }
 
-        // Merge new domain tokens into existing whitelist
-        merged.webDomainTokens.formUnion(pickerSelection.webDomainTokens)
-        merged.categoryTokens.formUnion(pickerSelection.categoryTokens)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        var config = (try? decoder.decode(ScreenTimeConfiguration.self, from: data)) ?? ScreenTimeConfiguration()
 
-        // Save merged selection locally
-        if let data = try? JSONEncoder().encode(merged) {
-            UserDefaults.standard.set(data.base64EncodedString(), forKey: "screentime.websiteSelection")
+        // Add domain if not already present
+        let clean = domain.lowercased()
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "www.", with: "")
+        if !config.allowedWebsites.contains(clean) {
+            config.allowedWebsites.append(clean)
         }
+        // Switch to whitelist mode so the content blocker actually enforces it
+        config.websiteFilterMode = .whitelist
+        config.contentBlockerEnabled = true
 
-        // Apply immediately
-        settingsManager.applyWebsiteRestrictions()
-        needsWhitelistMode = settingsManager.configuration.websiteFilterMode != .whitelist
-
-        let webCount = merged.webDomainTokens.count
-        let catCount = merged.categoryTokens.count
-        if needsWhitelistMode {
-            addResult = "Saved (\(webCount) site\(webCount == 1 ? "" : "s"), \(catCount) categor\(catCount == 1 ? "y" : "ies")). Ask admin to enable 'Allow Only Listed Sites'."
-        } else if webCount == 0 && catCount > 0 {
-            addResult = "⚠️ Only categories were saved (\(catCount)). In the picker, scroll to Websites and select the specific site name, not a category."
-        } else if webCount == 0 {
-            addResult = "⚠️ Nothing was selected. Open the picker and select a website by name."
-        } else {
-            addResult = "✓ \(webCount) website\(webCount == 1 ? "" : "s") added to whitelist."
+        // Save back to Firebase
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(config),
+              let putURL = URL(string: "\(dbURL)/users/\(user.uid)/settings.json?auth=\(token)") else {
+            addError = "Encode error"
+            isAdding = false; return
         }
+        var req = URLRequest(url: putURL)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
 
-        // Update Firebase setup info
-        if let user = auth.currentUser {
-            let token = await auth.freshToken() ?? user.idToken
-            let report: [String: Any] = [
-                "siteCount": merged.webDomainTokens.count,
-                "categoryCount": merged.categoryTokens.count,
-                "timestamp": Date().timeIntervalSince1970 * 1000
-            ]
-            if let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/websiteSetup.json?auth=\(token)"),
-               let body = try? JSONSerialization.data(withJSONObject: report) {
-                var req = URLRequest(url: url)
-                req.httpMethod = "PUT"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.httpBody = body
-                _ = try? await URLSession.shared.data(for: req)
-            }
-        }
+        // Apply locally right now
+        #if !targetEnvironment(simulator)
+        settingsManager.applyRemoteConfiguration(config)
+        #endif
 
-        // Remove this domain from pending list
+        // Remove this entry from pending list
         await syncService.removePendingWebsite(pushKey: pushKey)
-
-        // Reset picker so onDismiss doesn't re-trigger a double-save
-        pickerSelection = FamilyActivitySelection()
 
         isAdding = false
         added = true
-        #endif
     }
 }
 

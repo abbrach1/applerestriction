@@ -24,6 +24,8 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var downtimeSchedule: DowntimeSchedule = DowntimeSchedule()
     var isLocked: Bool = false
     var blockNewApps: Bool = false
+    var contentBlockerEnabled: Bool = false
+    var forceDNS: Bool = false
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -43,8 +45,10 @@ extension ScreenTimeConfiguration {
         appTimeLimits     = try c.decodeIfPresent([AppTimeLimit].self, forKey: .appTimeLimits)    ?? []
         downtimeEnabled   = try c.decodeIfPresent(Bool.self,          forKey: .downtimeEnabled)   ?? false
         downtimeSchedule  = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
-        isLocked          = try c.decodeIfPresent(Bool.self,          forKey: .isLocked)          ?? false
-        blockNewApps      = try c.decodeIfPresent(Bool.self,          forKey: .blockNewApps)      ?? false
+        isLocked               = try c.decodeIfPresent(Bool.self, forKey: .isLocked)               ?? false
+        blockNewApps           = try c.decodeIfPresent(Bool.self, forKey: .blockNewApps)           ?? false
+        contentBlockerEnabled  = try c.decodeIfPresent(Bool.self, forKey: .contentBlockerEnabled)  ?? false
+        forceDNS               = try c.decodeIfPresent(Bool.self, forKey: .forceDNS)               ?? false
     }
 }
 
