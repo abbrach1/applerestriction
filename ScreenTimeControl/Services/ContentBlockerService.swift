@@ -45,17 +45,30 @@ class ContentBlockerService {
 
     // MARK: - DNS
 
-    /// Install a DoH profile pointing to CleanBrowsing Family Filter.
-    /// Calling multiple times is safe — NEDNSSettingsManager replaces
-    /// the existing profile rather than stacking duplicates.
-    func enableForcedDNS() async {
+    /// Returns whether the DNS profile is currently installed and enabled.
+    func isDNSEnabled() async -> Bool {
+        await withCheckedContinuation { continuation in
+            NEDNSSettingsManager.shared().loadFromPreferences { _ in
+                continuation.resume(returning: NEDNSSettingsManager.shared().isEnabled)
+            }
+        }
+    }
+
+    /// Install a NextDNS DoH profile for the given profile ID.
+    /// Falls back to NextDNS default (no filtering) if profileID is empty.
+    /// Calling multiple times is safe — NEDNSSettingsManager replaces existing profile.
+    func enableForcedDNS(profileID: String) async {
         let manager = NEDNSSettingsManager.shared()
         await withCheckedContinuation { continuation in
             manager.loadFromPreferences { _ in
-                let doh = NEDNSOverHTTPSSettings(servers: ["9.9.9.9"])
-                doh.serverURL = URL(string: "https://doh.cleanbrowsing.org/doh/family-filter/")
+                // NextDNS anycast IPs as fallback servers
+                let doh = NEDNSOverHTTPSSettings(servers: ["45.90.28.0", "45.90.30.0"])
+                let urlString = profileID.isEmpty
+                    ? "https://dns.nextdns.io"
+                    : "https://dns.nextdns.io/\(profileID)"
+                doh.serverURL = URL(string: urlString)
                 manager.dnsSettings = doh
-                manager.localizedDescription = "B-SAFE Family Filter"
+                manager.localizedDescription = "B-SAFE DNS Filter"
                 manager.saveToPreferences { error in
                     if let error {
                         print("[B-SAFE] DNS profile save error: \(error)")

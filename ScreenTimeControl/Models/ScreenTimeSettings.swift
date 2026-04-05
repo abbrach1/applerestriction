@@ -26,6 +26,9 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var blockNewApps: Bool = false
     var contentBlockerEnabled: Bool = false
     var forceDNS: Bool = false
+    var nextDNSProfileID: String = ""       // NextDNS profile ID, e.g. "abc123"
+    var dnsAlertOnRemoval: Bool = false     // notify admin if child removes DNS profile
+    var dnsAutoReapply: Bool = false        // automatically re-install DNS profile if removed
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -45,10 +48,13 @@ extension ScreenTimeConfiguration {
         appTimeLimits     = try c.decodeIfPresent([AppTimeLimit].self, forKey: .appTimeLimits)    ?? []
         downtimeEnabled   = try c.decodeIfPresent(Bool.self,          forKey: .downtimeEnabled)   ?? false
         downtimeSchedule  = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
-        isLocked               = try c.decodeIfPresent(Bool.self, forKey: .isLocked)               ?? false
-        blockNewApps           = try c.decodeIfPresent(Bool.self, forKey: .blockNewApps)           ?? false
-        contentBlockerEnabled  = try c.decodeIfPresent(Bool.self, forKey: .contentBlockerEnabled)  ?? false
-        forceDNS               = try c.decodeIfPresent(Bool.self, forKey: .forceDNS)               ?? false
+        isLocked               = try c.decodeIfPresent(Bool.self,   forKey: .isLocked)               ?? false
+        blockNewApps           = try c.decodeIfPresent(Bool.self,   forKey: .blockNewApps)           ?? false
+        contentBlockerEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .contentBlockerEnabled)  ?? false
+        forceDNS               = try c.decodeIfPresent(Bool.self,   forKey: .forceDNS)               ?? false
+        nextDNSProfileID       = try c.decodeIfPresent(String.self, forKey: .nextDNSProfileID)       ?? ""
+        dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? false
+        dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? false
     }
 }
 
@@ -114,6 +120,27 @@ struct RemoteCommand: Codable, Identifiable {
         case lockDevice
         case unlockAll
         case refreshSettings
+    }
+}
+
+// MARK: - Tamper Alert (child → admin, stored at /users/uid/tamperAlerts/{pushKey})
+
+struct TamperAlert: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var type: String = ""       // e.g. "dns_removed"
+    var message: String = ""
+    var timestamp: Date = Date()
+    var dismissed: Bool = false
+}
+
+extension TamperAlert {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decodeIfPresent(String.self, forKey: .id)        ?? UUID().uuidString
+        type      = try c.decodeIfPresent(String.self, forKey: .type)      ?? ""
+        message   = try c.decodeIfPresent(String.self, forKey: .message)   ?? ""
+        timestamp = try c.decodeIfPresent(Date.self,   forKey: .timestamp) ?? Date()
+        dismissed = try c.decodeIfPresent(Bool.self,   forKey: .dismissed) ?? false
     }
 }
 

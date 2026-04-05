@@ -45,6 +45,7 @@ class AdminUserViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var appListReport: AppListReport?
     @Published var websiteSetupInfo: WebsiteSetupInfo?
+    @Published var tamperAlerts: [(pushKey: String, alert: TamperAlert)] = []
 
     struct WebsiteSetupInfo {
         let siteCount: Int
@@ -144,6 +145,7 @@ class AdminUserViewModel: ObservableObject {
             group.addTask { await self.loadSettings(uid: uid, idToken: idToken) }
             group.addTask { await self.loadAppList(uid: uid, idToken: idToken) }
             group.addTask { await self.loadWebsiteSetup(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadTamperAlerts(uid: uid, idToken: idToken) }
         }
 
         isLoading = false
@@ -188,6 +190,31 @@ class AdminUserViewModel: ObservableObject {
                 timestamp: Date(timeIntervalSince1970: ms / 1000)
             )
         }
+    }
+
+    func loadTamperAlerts(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/tamperAlerts.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .millisecondsSince1970
+        var results: [(pushKey: String, alert: TamperAlert)] = []
+        for (key, val) in dict {
+            if let d = try? JSONSerialization.data(withJSONObject: val),
+               let alert = try? dec.decode(TamperAlert.self, from: d),
+               !alert.dismissed {
+                results.append((pushKey: key, alert: alert))
+            }
+        }
+        tamperAlerts = results.sorted { $0.alert.timestamp > $1.alert.timestamp }
+    }
+
+    func dismissTamperAlert(pushKey: String, uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/tamperAlerts/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        tamperAlerts.removeAll { $0.pushKey == pushKey }
     }
 
     func markAppListReviewed(uid: String, idToken: String) async {
@@ -368,6 +395,36 @@ struct AdminUserControlView: View {
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity)
                     .background(.red)
+            }
+
+            // Tamper alert banners
+            ForEach(vm.tamperAlerts, id: \.pushKey) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.white)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tamper Detected")
+                            .font(.caption).fontWeight(.bold).foregroundStyle(.white)
+                        Text(item.alert.message)
+                            .font(.caption2).foregroundStyle(.white.opacity(0.9))
+                        Text(item.alert.timestamp.formatted(.relative(presentation: .named)))
+                            .font(.caption2).foregroundStyle(.white.opacity(0.7))
+                    }
+                    Spacer()
+                    Button {
+                        Task {
+                            let token = await auth.freshToken() ?? ""
+                            await vm.dismissTamperAlert(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color.orange)
             }
 
             // Tab picker
@@ -579,31 +636,76 @@ struct WebsiteTab: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Safari Content Blocker")
                                 .font(.subheadline).fontWeight(.medium)
-                            Text("Enforces website rules inside Safari using plain domain names")
+                            Text("Enforces allow/block list inside Safari using plain domain names")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } icon: {
                         Image(systemName: "safari.fill").foregroundStyle(.blue)
                     }
                 }
+            } header: { Text("Extra Protection") }
 
+            Section {
                 Toggle(isOn: $vm.config.forceDNS) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Force CleanBrowsing DNS")
+                            Text("Force NextDNS")
                                 .font(.subheadline).fontWeight(.medium)
-                            Text("Blocks adult & malware domains system-wide (all apps, not just Safari)")
+                            Text("Blocks domains system-wide across all apps, not just Safari")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } icon: {
                         Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
                     }
                 }
+
+                if vm.config.forceDNS {
+                    HStack {
+                        Image(systemName: "person.badge.key.fill")
+                            .foregroundStyle(.purple)
+                            .frame(width: 28)
+                        TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .font(.subheadline)
+                    }
+
+                    Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Alert Me If Removed")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Sends a tamper alert if the child removes the DNS profile")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
+                        }
+                    }
+
+                    Toggle(isOn: $vm.config.dnsAutoReapply) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Auto Re-Apply If Removed")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Attempts to reinstall the profile automatically (child must approve)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green)
+                        }
+                    }
+                }
             } header: {
-                Text("Extra Protection")
+                Text("NextDNS")
             } footer: {
-                Text("Content Blocker uses admin's allowed/blocked list in Safari. CleanBrowsing DNS works across all apps and can't be bypassed by switching browsers.")
-                    .font(.caption)
+                if vm.config.forceDNS {
+                    Text("Find your Profile ID at nextdns.io → your profile → Setup. Each device can have its own profile for custom filtering rules.")
+                        .font(.caption)
+                } else {
+                    Text("NextDNS filters domains system-wide. Create a free account at nextdns.io for custom blocklists and analytics.")
+                        .font(.caption)
+                }
             }
 
             Section {

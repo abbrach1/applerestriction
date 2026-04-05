@@ -208,7 +208,7 @@ class ScreenTimeSettingsManager: ObservableObject {
         if config.isLocked {
             lockAllApps()
             ContentBlockerService.shared.applyRules(for: config)
-            Task { if config.forceDNS { await ContentBlockerService.shared.enableForcedDNS() } }
+            Task { if config.forceDNS { await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID) } }
             return
         }
 
@@ -248,7 +248,7 @@ class ScreenTimeSettingsManager: ObservableObject {
 
         Task {
             if config.forceDNS {
-                await ContentBlockerService.shared.enableForcedDNS()
+                await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
             } else {
                 await ContentBlockerService.shared.disableForcedDNS()
             }

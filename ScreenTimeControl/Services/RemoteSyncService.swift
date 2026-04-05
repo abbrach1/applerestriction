@@ -233,6 +233,7 @@ class RemoteSyncService: ObservableObject {
         let (fetchedConfig, _, _) = await (configFetch, websitesFetch, notifFetch)
         if let config = fetchedConfig {
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+            await checkDNSTamper(config: config, uid: user.uid, idToken: token)
         }
         lastSyncDate = Date()
     }
@@ -342,6 +343,44 @@ class RemoteSyncService: ObservableObject {
 
         await markCommandExecuted(command.id)
         lastSyncDate = Date()
+    }
+
+    // MARK: - DNS Tamper Detection
+
+    private func checkDNSTamper(config: ScreenTimeConfiguration, uid: String, idToken: String) async {
+        // Only relevant if admin enabled forceDNS and at least one of the tamper options
+        guard config.forceDNS, config.dnsAlertOnRemoval || config.dnsAutoReapply else { return }
+
+        #if !targetEnvironment(simulator)
+        let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
+        guard !isEnabled else { return }  // DNS profile is still active — nothing to do
+
+        // DNS was removed by the child
+        if config.dnsAlertOnRemoval {
+            await postTamperAlert(uid: uid, idToken: idToken,
+                                  type: "dns_removed",
+                                  message: "DNS filter profile was removed from the device.")
+        }
+
+        if config.dnsAutoReapply {
+            // Re-installing will prompt the user to approve — child can decline,
+            // but each attempt is logged and admin is still alerted above.
+            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+        }
+        #endif
+    }
+
+    private func postTamperAlert(uid: String, idToken: String, type: String, message: String) async {
+        let alert = TamperAlert(type: type, message: message, timestamp: Date())
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(alert),
+              let url = URL(string: "\(firebaseURL)/users/\(uid)/tamperAlerts.json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     // MARK: - Firebase REST Helpers
