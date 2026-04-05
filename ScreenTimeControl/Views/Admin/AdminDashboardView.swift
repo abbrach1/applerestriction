@@ -923,6 +923,42 @@ struct AppsTab: View {
     }
 }
 
+// MARK: - CommandsTab helpers
+
+extension CommandsTab {
+    func sendNotification() async {
+        let body = notifBody.trimmingCharacters(in: .whitespaces)
+        guard !body.isEmpty else { return }
+        isSendingNotif = true
+
+        let token = await auth.freshToken() ?? ""
+        let note = AdminNotification(
+            title: notifTitle.trimmingCharacters(in: .whitespaces),
+            body: body,
+            timestamp: Date()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(note),
+              let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/notifications.json?auth=\(token)") else {
+            isSendingNotif = false; return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
+
+        notifTitle = ""
+        notifBody = ""
+        notifBodyFocused = false
+        isSendingNotif = false
+        notifSent = true
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        notifSent = false
+    }
+}
+
 // WebsiteTab has its own refresh for websiteSetupInfo
 extension WebsiteTab {
     func refreshSetupInfo() async {
@@ -938,8 +974,51 @@ struct CommandsTab: View {
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
 
+    @State private var notifTitle = ""
+    @State private var notifBody = ""
+    @State private var isSendingNotif = false
+    @State private var notifSent = false
+    @FocusState private var notifBodyFocused: Bool
+
     var body: some View {
         List {
+            // Send Notification
+            Section {
+                TextField("Title (optional)", text: $notifTitle)
+                    .autocorrectionDisabled()
+                TextField("Message", text: $notifBody)
+                    .focused($notifBodyFocused)
+
+                Button {
+                    Task { await sendNotification() }
+                } label: {
+                    HStack {
+                        if isSendingNotif {
+                            ProgressView().tint(.white)
+                        } else if notifSent {
+                            Image(systemName: "checkmark.circle.fill")
+                        } else {
+                            Image(systemName: "bell.badge.fill")
+                        }
+                        Text(notifSent ? "Sent!" : "Send Notification")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(notifSent ? Color.green : Color.indigo)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(notifBody.trimmingCharacters(in: .whitespaces).isEmpty || isSendingNotif)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .animation(.easeInOut(duration: 0.2), value: notifSent)
+            } header: {
+                Text("Send Notification")
+            } footer: {
+                Text("The device will receive this as a push notification within 10 seconds.")
+            }
+
             Section("Instant Commands") {
                 CommandRow(icon: "lock.fill", label: "Lock All Apps Now", color: .red) {
                     Task {

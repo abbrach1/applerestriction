@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import UIKit
+import UserNotifications
 
 /// Syncs Screen Time settings with Firebase Realtime Database for remote control.
 ///
@@ -228,11 +229,49 @@ class RemoteSyncService: ObservableObject {
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
         async let websitesFetch: Void = loadPendingWebsites()
-        let (fetchedConfig, _) = await (configFetch, websitesFetch)
+        async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
+        let (fetchedConfig, _, _) = await (configFetch, websitesFetch, notifFetch)
         if let config = fetchedConfig {
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
         }
         lastSyncDate = Date()
+    }
+
+    // MARK: - Notifications
+
+    /// Request permission once at startup (child device only).
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    /// Poll /users/uid/notifications, fire a local notification for each, then delete from Firebase.
+    private func deliverPendingNotifications(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/notifications.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+
+        for (pushKey, value) in dict {
+            guard let noteData = try? JSONSerialization.data(withJSONObject: value),
+                  let note = try? decoder.decode(AdminNotification.self, from: noteData) else { continue }
+
+            // Show local notification
+            let content = UNMutableNotificationContent()
+            content.title = note.title.isEmpty ? "B-SAFE" : note.title
+            content.body  = note.body
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: note.id,
+                content: content,
+                trigger: nil  // deliver immediately
+            )
+            try? await UNUserNotificationCenter.current().add(request)
+
+            // Delete from Firebase so it doesn't re-deliver
+            try? await firebaseDelete(path: "users/\(uid)/notifications/\(pushKey)", idToken: idToken)
+        }
     }
 
     func loadPendingWebsites() async {
@@ -264,7 +303,8 @@ class RemoteSyncService: ObservableObject {
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
         async let websitesFetch: Void = loadPendingWebsites()
-        let (fetchedConfig, _) = await (configFetch, websitesFetch)
+        async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
+        let (fetchedConfig, _, _) = await (configFetch, websitesFetch, notifFetch)
         if let fetchedConfig {
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(fetchedConfig)
         }

@@ -117,6 +117,25 @@ struct RemoteCommand: Codable, Identifiable {
     }
 }
 
+// MARK: - Admin Notification (admin → child, stored at /users/uid/notifications/{pushKey})
+
+struct AdminNotification: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var title: String = ""
+    var body: String = ""
+    var timestamp: Date = Date()
+}
+
+extension AdminNotification {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decodeIfPresent(String.self, forKey: .id)        ?? UUID().uuidString
+        title     = try c.decodeIfPresent(String.self, forKey: .title)     ?? ""
+        body      = try c.decodeIfPresent(String.self, forKey: .body)      ?? ""
+        timestamp = try c.decodeIfPresent(Date.self,   forKey: .timestamp) ?? Date()
+    }
+}
+
 // MARK: - App List Report (child → admin, stored at /users/uid/appList)
 
 struct AppListReport: Codable {
