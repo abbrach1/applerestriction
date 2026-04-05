@@ -226,13 +226,12 @@ class RemoteSyncService: ObservableObject {
         }
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        async let settingsTask: () = {
-            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
-                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
-            }
-        }()
-        async let websitesTask: () = loadPendingWebsites()
-        _ = await (settingsTask, websitesTask)
+        async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
+        async let websitesFetch: Void = loadPendingWebsites()
+        let (fetchedConfig, _) = await (configFetch, websitesFetch)
+        if let config = fetchedConfig {
+            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+        }
         lastSyncDate = Date()
     }
 
@@ -263,13 +262,12 @@ class RemoteSyncService: ObservableObject {
         }
         guard let user = FirebaseAuthService.shared.currentUser else { return }
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        async let settingsTask: () = {
-            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
-                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
-            }
-        }()
-        async let websitesTask: () = loadPendingWebsites()
-        _ = await (settingsTask, websitesTask)
+        async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
+        async let websitesFetch: Void = loadPendingWebsites()
+        let (fetchedConfig, _) = await (configFetch, websitesFetch)
+        if let fetchedConfig {
+            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(fetchedConfig)
+        }
         lastSyncDate = Date()
     }
 
