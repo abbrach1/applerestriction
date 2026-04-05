@@ -210,6 +210,14 @@ class ScreenTimeSettingsManager: ObservableObject {
             startDowntimeTimer()
             checkAndApplyDowntime()
         }
+        // Restore website blocking (persisted in configuration but not in ManagedSettingsStore)
+        if configuration.isLocked {
+            store.shield.applicationCategories = AppPolicy.all()
+            store.shield.webDomainCategories = WebPolicy.all()
+            isDowntimeActive = true
+        } else {
+            applyWebsiteRestrictions()
+        }
     }
 }
 

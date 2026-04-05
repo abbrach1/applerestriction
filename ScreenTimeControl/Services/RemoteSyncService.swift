@@ -157,16 +157,19 @@ class RemoteSyncService: ObservableObject {
 
     /// Child → fetches all unexecuted commands from Firebase (UID-based path)
     func checkForCommands() async -> [RemoteCommand] {
-        let auth = FirebaseAuthService.shared
-        guard let user = auth.currentUser else { return [] }
+        let authService = FirebaseAuthService.shared
+        guard let user = authService.currentUser else { return [] }
+        let token = await authService.freshToken() ?? user.idToken
         let path = "users/\(user.uid)/commands"
         do {
-            let data = try await firebaseGet(path: path, idToken: user.idToken)
+            let data = try await firebaseGet(path: path, idToken: token)
             guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
             var commands: [RemoteCommand] = []
             for (_, value) in dict {
                 if let cmdData = try? JSONSerialization.data(withJSONObject: value),
-                   let cmd = try? JSONDecoder().decode(RemoteCommand.self, from: cmdData),
+                   let cmd = try? decoder.decode(RemoteCommand.self, from: cmdData),
                    !cmd.executed {
                     commands.append(cmd)
                 }
@@ -178,16 +181,19 @@ class RemoteSyncService: ObservableObject {
 
     /// Child → marks a command as done by deleting it from Firebase
     func markCommandExecuted(_ commandId: String) async {
-        let auth = FirebaseAuthService.shared
-        guard let user = auth.currentUser else { return }
+        let authService = FirebaseAuthService.shared
+        guard let user = authService.currentUser else { return }
+        let token = await authService.freshToken() ?? user.idToken
         let path = "users/\(user.uid)/commands"
-        if let data = try? await firebaseGet(path: path, idToken: user.idToken),
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        if let data = try? await firebaseGet(path: path, idToken: token),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for (pushKey, value) in dict {
                 if let cmdData = try? JSONSerialization.data(withJSONObject: value),
-                   let cmd = try? JSONDecoder().decode(RemoteCommand.self, from: cmdData),
+                   let cmd = try? decoder.decode(RemoteCommand.self, from: cmdData),
                    cmd.id == commandId {
-                    try? await firebaseDelete(path: "\(path)/\(pushKey)", idToken: user.idToken)
+                    try? await firebaseDelete(path: "\(path)/\(pushKey)", idToken: token)
                 }
             }
         }
@@ -198,8 +204,8 @@ class RemoteSyncService: ObservableObject {
     /// Child device: start polling Firebase for new commands
     func startPolling(interval: TimeInterval = 30) {
         stopPolling()
-        // Run immediately, then repeat
-        Task { await pollAndExecute() }
+        // Apply latest saved settings immediately, then keep polling for commands
+        Task { await manualSync() }
         pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.pollAndExecute()
