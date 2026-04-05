@@ -47,7 +47,7 @@ class RemoteSyncService: ObservableObject {
     }
 
     #if !targetEnvironment(simulator)
-    private func recheckDNSOnForeground() async {
+    func recheckDNSOnForeground() async {
         guard let uid = Auth.auth().currentUser?.uid,
               let config = try? await Database.database()
                 .reference(withPath: "users/\(uid)/settings")
@@ -76,7 +76,7 @@ class RemoteSyncService: ObservableObject {
         }
     }
     #else
-    private func recheckDNSOnForeground() async {}
+    func recheckDNSOnForeground() async {}
     #endif
 
     // MARK: - Real-time Listeners
