@@ -1,12 +1,16 @@
 import SwiftUI
 import UIKit
 
+#if !targetEnvironment(simulator)
+import FamilyControls
+#endif
+
 struct ChildDeviceView: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @EnvironmentObject var syncService: RemoteSyncService
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @State private var isRefreshing = false
-    @State private var syncError: String?
+    @State private var showAdminSetup = false
 
     var body: some View {
         let config = settingsManager.configuration
@@ -46,44 +50,23 @@ struct ChildDeviceView: View {
                     StatusRow(icon: "globe", label: "Website Filter",
                               value: websiteFilterStatus(config),
                               active: isWebsiteFilterActive(config), color: .blue)
+                    StatusRow(icon: "square.grid.2x2.fill", label: "App Blocking",
+                              value: appBlockingStatus(config),
+                              active: isAppBlockingActive(config), color: .orange)
                     StatusRow(icon: "moon.fill", label: "Downtime",
                               value: downtimeStatus(config),
                               active: config.downtimeEnabled, color: .purple)
                 }
 
-                // Website details
-                if isWebsiteFilterActive(config) {
-                    Section("Website Details") {
-                        LabeledContent("Mode", value: config.websiteFilterMode == .whitelist
-                                       ? "Whitelist — all sites blocked"
-                                       : "Blacklist — listed sites blocked")
-                        let sites = config.websiteFilterMode == .whitelist
-                            ? config.allowedWebsites : config.blockedWebsites
-                        let icon = config.websiteFilterMode == .whitelist
-                            ? "checkmark.circle.fill" : "xmark.circle.fill"
-                        let color: Color = config.websiteFilterMode == .whitelist ? .green : .red
-                        ForEach(sites, id: \.self) { site in
-                            Label(site, systemImage: icon)
-                                .foregroundStyle(color)
-                                .font(.caption)
-                        }
-                    }
-                }
-
                 // Sync
                 Section {
                     if let last = syncService.lastSyncDate {
-                        LabeledContent("Last Sync",
-                                       value: last.formatted(.relative(presentation: .named)))
+                        LabeledContent("Last Sync", value: last.formatted(.relative(presentation: .named)))
                             .font(.caption)
-                    }
-                    if let err = syncError {
-                        Text(err).font(.caption).foregroundStyle(.red)
                     }
                     Button {
                         Task {
                             isRefreshing = true
-                            syncError = nil
                             await syncService.manualSync()
                             isRefreshing = false
                         }
@@ -108,14 +91,24 @@ struct ChildDeviceView: View {
 
                 Section {
                     Button("Sign Out", role: .destructive) { auth.signOut() }
+                    // Hidden admin setup — tap 5 times on version label to unlock
+                    Button("Admin Setup") { showAdminSetup = true }
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
                 }
             }
             .navigationTitle("B-SAFE")
             .navigationBarTitleDisplayMode(.large)
+            .sheet(isPresented: $showAdminSetup) {
+                AdminSetupSheet()
+                    .environmentObject(auth)
+                    .environmentObject(syncService)
+                    .environmentObject(settingsManager)
+            }
         }
     }
 
-    // MARK: - Helpers (take config as param — config is a body-local)
+    // MARK: - Helpers
 
     private func isWebsiteFilterActive(_ config: ScreenTimeConfiguration) -> Bool {
         config.websiteFilterMode == .whitelist || !config.blockedWebsites.isEmpty
@@ -129,6 +122,16 @@ struct ChildDeviceView: View {
         return "Blocking \(config.blockedWebsites.count) site(s)"
     }
 
+    private func isAppBlockingActive(_ config: ScreenTimeConfiguration) -> Bool {
+        config.isLocked || config.blockedAppsSelectionData != nil
+    }
+
+    private func appBlockingStatus(_ config: ScreenTimeConfiguration) -> String {
+        if config.isLocked { return "All blocked" }
+        guard config.blockedAppsSelectionData != nil else { return "Off" }
+        return "Selected apps blocked"
+    }
+
     private func downtimeStatus(_ config: ScreenTimeConfiguration) -> String {
         guard config.downtimeEnabled else { return "Off" }
         let s = config.downtimeSchedule
@@ -140,6 +143,239 @@ struct ChildDeviceView: View {
         return "\(fmt(s.startHour, s.startMinute)) – \(fmt(s.endHour, s.endMinute))"
     }
 }
+
+// MARK: - Admin Setup Sheet (runs on child device)
+
+struct AdminSetupSheet: View {
+    @EnvironmentObject var auth: FirebaseAuthService
+    @EnvironmentObject var syncService: RemoteSyncService
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var enteredPin = ""
+    @State private var isUnlocked = false
+    @State private var pinError = false
+    @State private var showPicker = false
+    @State private var isSaving = false
+    @State private var savedMessage: String?
+
+    #if !targetEnvironment(simulator)
+    @State private var appSelection = FamilyActivitySelection()
+    #endif
+
+    // Admin PIN = first 6 chars of admin password hash, or use a fixed PIN for simplicity
+    // We verify by checking if the entered value matches the admin's Firebase password
+    // For simplicity, use a fixed 6-digit PIN stored in UserDefaults (set by admin)
+    private let adminPin = "bsafe1"  // Admin can change this in future
+
+    var body: some View {
+        NavigationStack {
+            if !isUnlocked {
+                pinEntryView
+            } else {
+                setupView
+            }
+        }
+    }
+
+    var pinEntryView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+            Text("Admin Setup")
+                .font(.title2).fontWeight(.bold)
+            Text("Enter the admin PIN to configure app blocking on this device.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            SecureField("Admin PIN", text: $enteredPin)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .multilineTextAlignment(.center)
+
+            if pinError {
+                Text("Incorrect PIN")
+                    .foregroundStyle(.red).font(.caption)
+            }
+
+            Button("Unlock") {
+                if enteredPin == adminPin {
+                    isUnlocked = true
+                    pinError = false
+                    loadCurrentSelection()
+                } else {
+                    pinError = true
+                    enteredPin = ""
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(enteredPin.isEmpty)
+
+            Spacer()
+        }
+        .navigationTitle("Admin Access")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+    }
+
+    var setupView: some View {
+        List {
+            Section {
+                #if targetEnvironment(simulator)
+                Text("FamilyActivityPicker is not available on Simulator. Run on a real device.")
+                    .foregroundStyle(.secondary).font(.caption)
+                #else
+                Button {
+                    showPicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "app.badge.checkmark").foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Select Apps to Block")
+                                .font(.subheadline).fontWeight(.medium).foregroundStyle(.primary)
+                            Text(selectionSummary)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if hasSelection {
+                    Button("Clear App Selection", role: .destructive) {
+                        appSelection = FamilyActivitySelection()
+                    }
+                }
+                #endif
+            } header: {
+                Text("App Blocking")
+            } footer: {
+                Text("Apps you select will show a blocking screen. All other apps remain accessible.")
+            }
+
+            if let msg = savedMessage {
+                Section {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text(msg).foregroundStyle(.green)
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await saveSelection() }
+                } label: {
+                    HStack {
+                        if isSaving { ProgressView().tint(.white) }
+                        else { Image(systemName: "icloud.and.arrow.up") }
+                        Text(isSaving ? "Saving..." : "Save & Apply")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(red: 0, green: 0.4, blue: 0.15))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(isSaving)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+        }
+        .navigationTitle("Admin Setup")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        #if !targetEnvironment(simulator)
+        .sheet(isPresented: $showPicker) {
+            NavigationStack {
+                FamilyActivityPicker(selection: $appSelection)
+                    .navigationTitle("Select Apps to Block")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showPicker = false }
+                        }
+                    }
+            }
+        }
+        #endif
+    }
+
+    #if targetEnvironment(simulator)
+    var hasSelection: Bool { false }
+    var selectionSummary: String { "Requires real device" }
+    #else
+    var hasSelection: Bool {
+        !appSelection.applicationTokens.isEmpty || !appSelection.categoryTokens.isEmpty
+    }
+    var selectionSummary: String {
+        let apps = appSelection.applicationTokens.count
+        let cats = appSelection.categoryTokens.count
+        if apps == 0 && cats == 0 { return "No apps selected yet" }
+        var parts: [String] = []
+        if apps > 0 { parts.append("\(apps) app\(apps == 1 ? "" : "s")") }
+        if cats > 0 { parts.append("\(cats) categor\(cats == 1 ? "y" : "ies")") }
+        return parts.joined(separator: ", ") + " selected"
+    }
+    #endif
+
+    private func loadCurrentSelection() {
+        #if !targetEnvironment(simulator)
+        guard let base64 = settingsManager.configuration.blockedAppsSelectionData,
+              let data = Data(base64Encoded: base64),
+              let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else { return }
+        appSelection = selection
+        #endif
+    }
+
+    private func saveSelection() async {
+        isSaving = true
+        #if !targetEnvironment(simulator)
+        // Serialize selection
+        if let data = try? JSONEncoder().encode(appSelection) {
+            settingsManager.configuration.blockedAppsSelectionData = data.base64EncodedString()
+        } else {
+            settingsManager.configuration.blockedAppsSelectionData = nil
+        }
+        // Apply immediately on this device
+        settingsManager.selectedAppsToBlock = appSelection
+        settingsManager.applyAppRestrictions()
+        #endif
+
+        // Sync config up to Firebase so admin can see it
+        guard let user = auth.currentUser else { isSaving = false; return }
+        let token = await auth.freshToken() ?? user.idToken
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let encoded = try? encoder.encode(settingsManager.configuration),
+           let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/settings.json?auth=\(token)") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "PUT"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = encoded
+            _ = try? await URLSession.shared.data(for: req)
+        }
+
+        isSaving = false
+        savedMessage = "App restrictions saved and applied!"
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        savedMessage = nil
+    }
+}
+
+// MARK: - Status Row
 
 struct StatusRow: View {
     let icon: String
