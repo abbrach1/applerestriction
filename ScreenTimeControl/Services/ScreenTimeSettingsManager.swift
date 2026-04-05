@@ -148,24 +148,27 @@ class ScreenTimeSettingsManager: ObservableObject {
     }
 
     // MARK: - Website Blocking
+    //
+    // NOTE: store.shield.webDomains requires opaque WebDomainToken values
+    // obtained from FamilyActivitySelection (on-device picker only).
+    // Plain domain strings cannot be converted to tokens remotely.
+    // Instead we use category-level blocking: any blocked domains → block all web,
+    // whitelist mode → block all web. Domain strings are stored for reference.
 
     func applyWebsiteRestrictions() {
         if configuration.websiteFilterMode == .blacklist {
-            var webDomains = Set<WebDomain>()
-            for domainStr in configuration.blockedWebsites {
-                webDomains.insert(WebDomain(domain: domainStr))
-            }
-            if webDomains.isEmpty {
-                store.shield.webDomains = nil
+            // Block all web categories if any domains are in the list;
+            // clear if the list is empty (admin explicitly removed all blocks).
+            if configuration.blockedWebsites.isEmpty {
+                if !isDowntimeActive {
+                    store.shield.webDomainCategories = nil
+                }
             } else {
-                store.shield.webDomains = webDomains
-            }
-            if !isDowntimeActive {
-                store.shield.webDomainCategories = nil
+                store.shield.webDomainCategories = WebPolicy.all()
             }
         } else {
+            // Whitelist mode: block all web content.
             store.shield.webDomainCategories = WebPolicy.all()
-            store.shield.webDomains = nil
         }
         saveConfiguration()
     }

@@ -252,8 +252,8 @@ struct WebsiteTab: View {
                 Text("Mode")
             } footer: {
                 Text(vm.config.websiteFilterMode == .blacklist
-                     ? "Everything is allowed except the sites you list below."
-                     : "Everything is blocked except the sites you list below.")
+                     ? "Add sites to the block list. When any sites are listed, ALL web browsing is blocked on the device."
+                     : "All web browsing is blocked on the device. Listed sites are saved for reference.")
                     .font(.caption)
             }
 
