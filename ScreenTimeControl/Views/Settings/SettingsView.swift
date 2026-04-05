@@ -6,44 +6,11 @@ struct SettingsView: View {
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @EnvironmentObject var auth: FirebaseAuthService
 
-    @State private var firebaseURL: String = ""
-    @State private var pollingInterval: Double = 30
     @State private var showRevokeAlert = false
 
     var body: some View {
         NavigationStack {
             Form {
-                // Firebase Configuration
-                Section {
-                    TextField(
-                        "https://applerestrictions-default-rtdb.firebaseio.com",
-                        text: $firebaseURL
-                    )
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-
-                    Button("Save") {
-                        syncService.firebaseURL = firebaseURL
-                    }
-                    .disabled(firebaseURL.isEmpty)
-                } header: {
-                    Text("Firebase Database URL")
-                } footer: {
-                    Text("1. Go to console.firebase.google.com\n2. Create project → Realtime Database → Test mode\n3. Copy the database URL and paste it above.")
-                }
-
-                // Polling
-                Section {
-                    VStack(alignment: .leading) {
-                        Text("Poll every \(Int(pollingInterval)) seconds")
-                        Slider(value: $pollingInterval, in: 10...120, step: 5)
-                    }
-                } header: {
-                    Text("Polling Interval")
-                } footer: {
-                    Text("How often the device checks for new remote commands.")
-                }
 
                 // Device Info
                 Section("Device Info") {
@@ -145,9 +112,6 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .onAppear {
-                firebaseURL = syncService.firebaseURL
-            }
             .alert("Revoke Access?", isPresented: $showRevokeAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Revoke", role: .destructive) {
