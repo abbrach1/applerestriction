@@ -41,5 +41,7 @@
     </array>
     <key>NSFamilyControlsUsageDescription</key>
     <string>Screen Time Control needs access to manage Screen Time settings and app restrictions on this device.</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 </dict>
 </plist>
