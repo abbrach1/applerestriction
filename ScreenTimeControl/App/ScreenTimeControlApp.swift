@@ -1,4 +1,6 @@
 import SwiftUI
+import FirebaseCore
+import FirebaseDatabase
 
 #if !targetEnvironment(simulator)
 import FamilyControls
@@ -10,6 +12,12 @@ struct ScreenTimeControlApp: App {
     @StateObject private var authManager = ActiveAuthorizationManager.shared
     @StateObject private var settingsManager = ActiveScreenTimeSettingsManager.shared
     @StateObject private var syncService = RemoteSyncService.shared
+
+    init() {
+        FirebaseApp.configure()
+        // Must be set before any Database reference is accessed
+        Database.database().isPersistenceEnabled = true
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -29,12 +37,11 @@ struct ScreenTimeControlApp: App {
                     .environmentObject(authManager)
                     .environmentObject(auth)
                     .task {
-                        // Register device in Firebase when logged in as child
                         if let user = auth.currentUser {
                             await syncService.registerDevice(
                                 uid: user.uid,
                                 email: user.email,
-                                idToken: user.idToken
+                                idToken: ""
                             )
                         }
                     }
@@ -45,12 +52,14 @@ struct ScreenTimeControlApp: App {
                     .environmentObject(settingsManager)
                     .task {
                         syncService.requestNotificationPermission()
-                        syncService.startNetworkMonitor()
                         if let user = auth.currentUser {
-                            let token = await auth.freshToken() ?? user.idToken
-                            await syncService.registerDevice(uid: user.uid, email: user.email, idToken: token)
+                            await syncService.registerDevice(
+                                uid: user.uid,
+                                email: user.email,
+                                idToken: ""
+                            )
                         }
-                        syncService.startPolling()
+                        syncService.startListening()
                     }
             }
         }

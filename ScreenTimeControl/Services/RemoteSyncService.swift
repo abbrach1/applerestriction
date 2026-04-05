@@ -2,360 +2,101 @@ import Foundation
 import Combine
 import UIKit
 import UserNotifications
-import Network
+import FirebaseAuth
+import FirebaseDatabase
 
-/// Syncs Screen Time settings with Firebase Realtime Database for remote control.
+/// Syncs Screen Time settings with Firebase Realtime Database.
 ///
-/// SETUP:
-/// 1. Go to https://console.firebase.google.com
-/// 2. Create a project → Realtime Database → Start in test mode
-/// 3. Copy your database URL (looks like: https://your-project-default-rtdb.firebaseio.com)
-/// 4. Enter it in the app's Settings tab under "Firebase URL"
+/// Uses the Firebase Database SDK's WebSocket listeners instead of REST polling:
+/// - One persistent WebSocket connection (vs 5 REST requests every 30s)
+/// - Changes pushed from server instantly (vs up to 30s delay)
+/// - .info/connected node tracks connection state (replaces NWPathMonitor)
+/// - Offline persistence caches data so restrictions survive network drops
 @MainActor
 class RemoteSyncService: ObservableObject {
     static let shared = RemoteSyncService()
 
-    @Published var isPaired: Bool = false
-    @Published var pairingCode: String = ""
-    @Published var connectedDevices: [DeviceInfo] = []
-    @Published var pendingCommands: [RemoteCommand] = []
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
     @Published var isOnline: Bool = true
-    @Published var pendingWebsites: [String: String] = [:]       // [pushKey: domain]
-    @Published var pendingApps: [String: RecommendedApp] = [:]   // [pushKey: app]
+    @Published var pendingWebsites: [String: String] = [:]
+    @Published var pendingApps: [String: RecommendedApp] = [:]
 
-    /// Firebase Realtime Database URL
-    private static let defaultFirebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+    // Keep for legacy compatibility
+    @Published var isPaired: Bool = false
+    @Published var pendingCommands: [RemoteCommand] = []
 
-    var firebaseURL: String {
-        get { UserDefaults.standard.string(forKey: "remote.firebaseURL") ?? Self.defaultFirebaseURL }
-        set { UserDefaults.standard.set(newValue, forKey: "remote.firebaseURL") }
-    }
+    private let dbRef = Database.database().reference()
+    private var listenerHandles: [(DatabaseReference, DatabaseHandle)] = []
+    private var connectedHandle: DatabaseHandle?
 
-    private var deviceId: String { DeviceInfo.current.id }
-    private var pollTimer: Timer?
-
-    // Connectivity + backoff
-    private let pathMonitor = NWPathMonitor()
-    private let monitorQueue = DispatchQueue(label: "bsafe.networkMonitor", qos: .utility)
-    private var consecutiveFailures = 0
-    private static let baseInterval: TimeInterval = 30
-    private static let maxInterval: TimeInterval = 300   // 5 min cap
+    // Still used by admin REST calls and manualSync fallback
+    private let firebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     private init() {}
 
-    // MARK: - Network Monitoring
+    // MARK: - Real-time Listeners
 
-    /// Start watching connectivity. Call once at app launch alongside startPolling().
-    func startNetworkMonitor() {
-        pathMonitor.pathUpdateHandler = { [weak self] path in
+    /// Start WebSocket listeners for all child-device data nodes.
+    /// Call once after the child logs in and Screen Time is authorized.
+    func startListening() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        stopListening()
+
+        // .info/connected — true when WebSocket is connected to Firebase servers
+        let connRef = Database.database().reference(withPath: ".info/connected")
+        connectedHandle = connRef.observe(.value) { [weak self] snapshot in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                let wasOnline = self.isOnline
-                self.isOnline = (path.status == .satisfied)
-                // Reconnected — reset backoff and sync immediately
-                if !wasOnline && self.isOnline {
-                    self.consecutiveFailures = 0
-                    await self.pollAndExecute()
-                }
+                self?.isOnline = snapshot.value as? Bool ?? false
             }
         }
-        pathMonitor.start(queue: monitorQueue)
-    }
 
-    // MARK: - Child Device Registration
+        let userRef = dbRef.child("users/\(uid)")
 
-    /// Call after login: registers this device under the user's UID in Firebase
-    func registerDevice(uid: String, email: String, idToken: String) async {
-        let info: [String: Any] = [
-            "email": email,
-            "deviceName": DeviceInfo.current.name,
-            "deviceModel": DeviceInfo.current.model,
-            "deviceId": deviceId,
-            "isOnline": true,
-            "lastSeen": ISO8601DateFormatter().string(from: Date())
-        ]
-        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/info.json?auth=\(idToken)") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "PUT"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: info)
-        _ = try? await URLSession.shared.data(for: req)
-        isPaired = true
-    }
-
-    // MARK: - Pairing
-
-    /// Child device: generate a 6-digit code and register this device on Firebase
-    func generatePairingCode() async {
-        let code = String(format: "%06d", Int.random(in: 100000...999999))
-        pairingCode = code
-
-        var info = DeviceInfo.current
-        info.isOnline = true
-
-        // Store device info under /pairing/{code} so parent can find it
-        do {
-            try await firebasePut(
-                path: "pairing/\(code)",
-                body: encodable(info)
-            )
-            // Also register under /devices/{id}
-            try await firebasePut(
-                path: "devices/\(deviceId)/info",
-                body: encodable(info)
-            )
-
-            UserDefaults.standard.set(code, forKey: "remote.pairingCode")
-            UserDefaults.standard.set(true, forKey: "remote.isPaired")
-            isPaired = true
-            syncError = nil
-        } catch {
-            syncError = "Registration failed: \(error.localizedDescription)"
-        }
-    }
-
-    /// Parent device: look up a child device by its pairing code and link to it
-    func pairWithDevice(code: String) async {
-        do {
-            let data = try await firebaseGet(path: "pairing/\(code)")
-            let childDevice = try JSONDecoder().decode(DeviceInfo.self, from: data)
-
-            connectedDevices.append(childDevice)
-            isPaired = true
-
-            // Persist connected devices list
-            if let encoded = try? JSONEncoder().encode(connectedDevices) {
-                UserDefaults.standard.set(encoded, forKey: "remote.connectedDevices")
-            }
-            UserDefaults.standard.set(true, forKey: "remote.isPaired")
-
-            // Remove pairing code once used
-            try? await firebaseDelete(path: "pairing/\(code)")
-
-            syncError = nil
-        } catch {
-            syncError = "Pairing failed — check the code and try again"
-        }
-    }
-
-    // MARK: - Settings Sync
-
-    /// Push current settings to Firebase (called from parent after configuring restrictions)
-    func pushSettings(_ config: ScreenTimeConfiguration) async {
-        do {
-            try await firebasePut(
-                path: "devices/\(config.deviceId.isEmpty ? deviceId : config.deviceId)/settings",
-                body: encodable(config)
-            )
-            lastSyncDate = Date()
-            syncError = nil
-        } catch {
-            syncError = "Push failed: \(error.localizedDescription)"
-        }
-    }
-
-    /// Pull settings from Firebase (called on child device)
-    func pullSettings() async -> ScreenTimeConfiguration? {
-        do {
-            let data = try await firebaseGet(path: "devices/\(deviceId)/settings")
-            let config = try JSONDecoder().decode(ScreenTimeConfiguration.self, from: data)
-            lastSyncDate = Date()
-            syncError = nil
-            return config
-        } catch {
-            // null response means no settings yet — not an error
-            return nil
-        }
-    }
-
-    // MARK: - Remote Commands
-
-    /// Parent → sends a command to a specific child device
-    func sendCommand(_ command: RemoteCommand, toDevice targetDeviceId: String) async {
-        do {
-            // Firebase POST under /devices/{id}/commands/ creates a unique child key
-            try await firebasePost(
-                path: "devices/\(targetDeviceId)/commands",
-                body: encodable(command)
-            )
-            syncError = nil
-        } catch {
-            syncError = "Command failed: \(error.localizedDescription)"
-        }
-    }
-
-    /// Child → fetches all unexecuted commands from Firebase (UID-based path)
-    func checkForCommands() async -> [RemoteCommand] {
-        let authService = FirebaseAuthService.shared
-        guard let user = authService.currentUser else { return [] }
-        let token = await authService.freshToken() ?? user.idToken
-        let path = "users/\(user.uid)/commands"
-        do {
-            let data = try await firebaseGet(path: path, idToken: token)
-            guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        // Settings — fires immediately with current value, then on every change
+        observe(userRef.child("settings")) { [weak self] snapshot in
+            guard let self else { return }
+            guard let dict = snapshot.value as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .millisecondsSince1970
-            var commands: [RemoteCommand] = []
-            for (_, value) in dict {
-                if let cmdData = try? JSONSerialization.data(withJSONObject: value),
-                   let cmd = try? decoder.decode(RemoteCommand.self, from: cmdData),
-                   !cmd.executed {
-                    commands.append(cmd)
-                }
+            guard let config = try? decoder.decode(ScreenTimeConfiguration.self, from: data) else { return }
+            await MainActor.run {
+                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+                self.lastSyncDate = Date()
+                self.syncError = nil
             }
-            pendingCommands = commands
-            return commands
-        } catch { return [] }
-    }
+            await self.checkDNSTamper(config: config, uid: uid)
+        }
 
-    /// Child → marks a command as done by deleting it from Firebase
-    func markCommandExecuted(_ commandId: String) async {
-        let authService = FirebaseAuthService.shared
-        guard let user = authService.currentUser else { return }
-        let token = await authService.freshToken() ?? user.idToken
-        let path = "users/\(user.uid)/commands"
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        if let data = try? await firebaseGet(path: path, idToken: token),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for (pushKey, value) in dict {
-                if let cmdData = try? JSONSerialization.data(withJSONObject: value),
-                   let cmd = try? decoder.decode(RemoteCommand.self, from: cmdData),
-                   cmd.id == commandId {
-                    try? await firebaseDelete(path: "\(path)/\(pushKey)", idToken: token)
-                }
+        // Commands — childAdded fires once per new command, not for existing ones
+        observeChildAdded(userRef.child("commands")) { snapshot in
+            guard let dict = snapshot.value as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            guard let cmd = try? decoder.decode(RemoteCommand.self, from: data),
+                  !cmd.executed else { return }
+            await self.executeCommand(cmd)
+            snapshot.ref.removeValue()   // delete after executing — no re-delivery
+        }
+
+        // Pending websites
+        observe(userRef.child("pendingWebsites")) { [weak self] snapshot in
+            await MainActor.run {
+                self?.pendingWebsites = snapshot.value as? [String: String] ?? [:]
             }
         }
-    }
 
-    // MARK: - Polling
-
-    /// Child device: start polling Firebase. Base interval is 30 s; backs off
-    /// exponentially on failure up to 5 min. Pauses entirely when offline.
-    func startPolling() {
-        stopPolling()
-        Task { await manualSync() }
-        scheduleNextPoll()
-    }
-
-    func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
-    }
-
-    private func scheduleNextPoll() {
-        let interval = currentInterval()
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.pollAndExecute()
-                self.scheduleNextPoll()   // reschedule after each tick (interval may have changed)
+        // Pending apps
+        observe(userRef.child("pendingApps")) { [weak self] snapshot in
+            guard let self else { return }
+            guard let dict = snapshot.value as? [String: Any] else {
+                await MainActor.run { self.pendingApps = [:] }
+                return
             }
-        }
-    }
-
-    /// Exponential backoff: 30s base, doubles per failure, caps at 5 min.
-    private func currentInterval() -> TimeInterval {
-        guard consecutiveFailures > 0 else { return Self.baseInterval }
-        let backed = Self.baseInterval * pow(2.0, Double(min(consecutiveFailures - 1, 4)))
-        return min(backed, Self.maxInterval)
-    }
-
-    private func pollAndExecute() async {
-        // Skip entirely when offline — NWPathMonitor will trigger a sync on reconnect
-        guard isOnline else { return }
-
-        let commands = await checkForCommands()
-        for command in commands { await executeCommand(command) }
-
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-
-        async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
-        async let websitesFetch: Void = loadPendingWebsites()
-        async let appsFetch: Void = loadPendingApps()
-        async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
-        let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
-
-        if let config = fetchedConfig {
-            consecutiveFailures = 0   // successful response — reset backoff
-            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
-            await checkDNSTamper(config: config, uid: user.uid, idToken: token)
-            lastSyncDate = Date()
-            syncError = nil
-        } else {
-            consecutiveFailures += 1
-            syncError = "Sync failed — retrying in \(Int(currentInterval()))s"
-        }
-    }
-
-    // MARK: - Notifications
-
-    /// Request permission once at startup (child device only).
-    func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-    }
-
-    /// Poll /users/uid/notifications, fire a local notification for each, then delete from Firebase.
-    private func deliverPendingNotifications(uid: String, idToken: String) async {
-        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/notifications.json?auth=\(idToken)") else { return }
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-
-        for (pushKey, value) in dict {
-            guard let noteData = try? JSONSerialization.data(withJSONObject: value),
-                  let note = try? decoder.decode(AdminNotification.self, from: noteData) else { continue }
-
-            // Show local notification
-            let content = UNMutableNotificationContent()
-            content.title = note.title.isEmpty ? "B-SAFE" : note.title
-            content.body  = note.body
-            content.sound = .default
-            let request = UNNotificationRequest(
-                identifier: note.id,
-                content: content,
-                trigger: nil  // deliver immediately
-            )
-            try? await UNUserNotificationCenter.current().add(request)
-
-            // Delete from Firebase so it doesn't re-deliver
-            try? await firebaseDelete(path: "users/\(uid)/notifications/\(pushKey)", idToken: idToken)
-        }
-    }
-
-    func loadPendingWebsites() async {
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        guard let url = URL(string: "\(firebaseURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)") else { return }
-        if let (data, _) = try? await URLSession.shared.data(from: url),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
-            pendingWebsites = dict
-        } else {
-            pendingWebsites = [:]
-        }
-    }
-
-    func removePendingWebsite(pushKey: String) async {
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        try? await firebaseDelete(path: "users/\(user.uid)/pendingWebsites/\(pushKey)", idToken: token)
-        pendingWebsites.removeValue(forKey: pushKey)
-    }
-
-    func loadPendingApps() async {
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        guard let url = URL(string: "\(firebaseURL)/users/\(user.uid)/pendingApps.json?auth=\(token)") else { return }
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
             var result: [String: RecommendedApp] = [:]
             for (key, val) in dict {
                 if let d = try? JSONSerialization.data(withJSONObject: val),
@@ -363,180 +104,168 @@ class RemoteSyncService: ObservableObject {
                     result[key] = app
                 }
             }
-            pendingApps = result
-        } else {
-            pendingApps = [:]
+            await MainActor.run { self.pendingApps = result }
+        }
+
+        // Notifications — childAdded fires once per new notification
+        observeChildAdded(userRef.child("notifications")) { snapshot in
+            guard let dict = snapshot.value as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            guard let note = try? decoder.decode(AdminNotification.self, from: data) else { return }
+            await self.deliverLocalNotification(note)
+            snapshot.ref.removeValue()   // delete after delivering
         }
     }
 
-    func removePendingApp(pushKey: String) async {
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        try? await firebaseDelete(path: "users/\(user.uid)/pendingApps/\(pushKey)", idToken: token)
-        pendingApps.removeValue(forKey: pushKey)
+    func stopListening() {
+        for (ref, handle) in listenerHandles {
+            ref.removeObserver(withHandle: handle)
+        }
+        listenerHandles = []
+        if let h = connectedHandle {
+            Database.database().reference(withPath: ".info/connected").removeObserver(withHandle: h)
+            connectedHandle = nil
+        }
     }
 
-    /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
+    // MARK: - Listener Helpers
+
+    /// `.value` observer — fires with full snapshot on attach and on every change.
+    private func observe(_ ref: DatabaseReference,
+                         handler: @escaping (DataSnapshot) async -> Void) {
+        let handle = ref.observe(.value) { snapshot in
+            Task { await handler(snapshot) }
+        }
+        listenerHandles.append((ref, handle))
+    }
+
+    /// `.childAdded` observer — fires once per existing child on attach,
+    /// then once for each new child added afterwards.
+    private func observeChildAdded(_ ref: DatabaseReference,
+                                   handler: @escaping (DataSnapshot) async -> Void) {
+        let handle = ref.observe(.childAdded) { snapshot in
+            Task { await handler(snapshot) }
+        }
+        listenerHandles.append((ref, handle))
+    }
+
+    // MARK: - Device Registration
+
+    func registerDevice(uid: String, email: String, idToken: String) async {
+        let info: [String: Any] = [
+            "email": email,
+            "deviceName": DeviceInfo.current.name,
+            "deviceModel": DeviceInfo.current.model,
+            "deviceId": DeviceInfo.current.id,
+            "isOnline": true,
+            "lastSeen": ISO8601DateFormatter().string(from: Date())
+        ]
+        dbRef.child("users/\(uid)/info").setValue(info)
+        isPaired = true
+    }
+
+    // MARK: - Manual Sync (refresh button)
+
+    /// Forces a fresh fetch from the server bypassing the local cache.
     func manualSync() async {
-        let commands = await checkForCommands()
-        for command in commands { await executeCommand(command) }
-        guard let user = FirebaseAuthService.shared.currentUser else { return }
-        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-        async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
-        async let websitesFetch: Void = loadPendingWebsites()
-        async let appsFetch: Void = loadPendingApps()
-        async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
-        let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
-        if let fetchedConfig {
-            consecutiveFailures = 0
-            syncError = nil
-            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(fetchedConfig)
-            lastSyncDate = Date()
-        }
-    }
-
-    /// Load the admin-saved ScreenTimeConfiguration for a user from Firebase
-    func loadUserSettings(uid: String, idToken: String) async -> ScreenTimeConfiguration? {
-        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/settings.json?auth=\(idToken)") else { return nil }
-        if let (data, _) = try? await URLSession.shared.data(from: url) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            let snapshot = try await dbRef.child("users/\(uid)/settings").getData()
+            guard let dict = snapshot.value as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .millisecondsSince1970
             if let config = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
-                return config
+                ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+                lastSyncDate = Date()
+                syncError = nil
             }
+        } catch {
+            syncError = "Sync failed: \(error.localizedDescription)"
         }
-        return nil
     }
+
+    // MARK: - Pending Item Removal
+
+    func removePendingWebsite(pushKey: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        dbRef.child("users/\(uid)/pendingWebsites/\(pushKey)").removeValue()
+        pendingWebsites.removeValue(forKey: pushKey)
+    }
+
+    func removePendingApp(pushKey: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        dbRef.child("users/\(uid)/pendingApps/\(pushKey)").removeValue()
+        pendingApps.removeValue(forKey: pushKey)
+    }
+
+    // MARK: - Notification Permission
+
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    // MARK: - Private: Command Execution
 
     private func executeCommand(_ command: RemoteCommand) async {
-        let settingsManager = ActiveScreenTimeSettingsManager.shared
-
+        let mgr = ActiveScreenTimeSettingsManager.shared
         switch command.type {
         case .lockDevice:
-            settingsManager.lockAllApps()
+            await MainActor.run { mgr.lockAllApps() }
         case .unlockAll:
-            settingsManager.unlockAll()
-        case .updateBlockedApps, .updateTimeLimits, .updateDowntime, .updateWebsites, .refreshSettings:
-            guard let user = FirebaseAuthService.shared.currentUser else { break }
-            let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
-            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
-                settingsManager.applyRemoteConfiguration(config)
-            }
+            await MainActor.run { mgr.unlockAll() }
+        case .updateBlockedApps, .updateTimeLimits, .updateDowntime,
+             .updateWebsites, .refreshSettings:
+            // Settings listener will already apply the latest config automatically.
+            // Force an immediate fetch for instant response to the command.
+            await manualSync()
         }
-
-        await markCommandExecuted(command.id)
-        lastSyncDate = Date()
     }
 
-    // MARK: - DNS Tamper Detection
+    // MARK: - Private: Notification Delivery
 
-    private func checkDNSTamper(config: ScreenTimeConfiguration, uid: String, idToken: String) async {
-        // Only relevant if admin enabled forceDNS and at least one of the tamper options
+    private func deliverLocalNotification(_ note: AdminNotification) async {
+        let content = UNMutableNotificationContent()
+        content.title = note.title.isEmpty ? "B-SAFE" : note.title
+        content.body  = note.body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: note.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Private: DNS Tamper Detection
+
+    private func checkDNSTamper(config: ScreenTimeConfiguration, uid: String) async {
         guard config.forceDNS, config.dnsAlertOnRemoval || config.dnsAutoReapply else { return }
-
         #if !targetEnvironment(simulator)
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        guard !isEnabled else { return }  // DNS profile is still active — nothing to do
+        guard !isEnabled else { return }
 
-        // DNS was removed by the child
         if config.dnsAlertOnRemoval {
-            await postTamperAlert(uid: uid, idToken: idToken,
-                                  type: "dns_removed",
-                                  message: "DNS filter profile was removed from the device.")
+            let alert = TamperAlert(type: "dns_removed",
+                                   message: "DNS filter profile was removed from the device.",
+                                   timestamp: Date())
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .millisecondsSince1970
+            if let data = try? encoder.encode(alert),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+            }
         }
 
         if config.dnsAutoReapply {
-            // Re-installing will prompt the user to approve — child can decline,
-            // but each attempt is logged and admin is still alerted above.
             await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
         }
         #endif
     }
 
-    private func postTamperAlert(uid: String, idToken: String, type: String, message: String) async {
-        let alert = TamperAlert(type: type, message: message, timestamp: Date())
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        guard let encoded = try? encoder.encode(alert),
-              let url = URL(string: "\(firebaseURL)/users/\(uid)/tamperAlerts.json?auth=\(idToken)") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = encoded
-        _ = try? await URLSession.shared.data(for: req)
-    }
+    // MARK: - Legacy Polling Stubs (kept so call sites compile)
 
-    // MARK: - Firebase REST Helpers
-
-    private func firebaseGet(path: String, idToken: String? = nil) async throws -> Data {
-        let url = try makeURL(for: path, idToken: idToken)
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try checkResponse(response, data: data)
-        return data
-    }
-
-    private func firebasePut(path: String, body: [String: Any], idToken: String? = nil) async throws {
-        let url = try makeURL(for: path, idToken: idToken)
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try checkResponse(response, data: data)
-    }
-
-    private func firebasePost(path: String, body: [String: Any], idToken: String? = nil) async throws {
-        let url = try makeURL(for: path, idToken: idToken)
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try checkResponse(response, data: data)
-    }
-
-    private func firebaseDelete(path: String, idToken: String? = nil) async throws {
-        let url = try makeURL(for: path, idToken: idToken)
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try checkResponse(response, data: data)
-    }
-
-    private func makeURL(for path: String, idToken: String?) throws -> URL {
-        let base = firebaseURL.hasSuffix("/") ? firebaseURL : firebaseURL + "/"
-        var urlStr = "\(base)\(path).json"
-        if let token = idToken, !token.isEmpty {
-            urlStr += "?auth=\(token)"
-        }
-        guard let url = URL(string: urlStr) else { throw URLError(.badURL) }
-        return url
-    }
-
-    // Keep old firebaseURL(for:) as alias for legacy call sites
-    private func firebaseURL(for path: String) throws -> URL {
-        try makeURL(for: path, idToken: FirebaseAuthService.shared.currentUser?.idToken)
-    }
-
-    private func checkResponse(_ response: URLResponse, data: Data) throws {
-        guard let http = response as? HTTPURLResponse else { return }
-        if http.statusCode == 404 { throw URLError(.fileDoesNotExist) }
-        guard 200..<300 ~= http.statusCode else {
-            throw NSError(
-                domain: "Firebase",
-                code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
-            )
-        }
-    }
-
-    private func encodable<T: Encodable>(_ value: T) -> [String: Any] {
-        guard let data = try? JSONEncoder().encode(value),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return [:]
-        }
-        return dict
-    }
+    /// Replaced by startListening(). Kept for source compatibility.
+    func startPolling() { startListening() }
+    func stopPolling()  { stopListening()  }
+    func startNetworkMonitor() {}   // replaced by .info/connected listener
 }
