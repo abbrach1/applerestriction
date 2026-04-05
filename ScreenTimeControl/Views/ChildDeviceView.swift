@@ -780,21 +780,23 @@ struct PendingWebsiteRow: View {
         .sheet(isPresented: $showSafari) {
             SafariView(url: URL(string: "https://\(domain)") ?? URL(string: "https://apple.com")!)
         }
-        .sheet(isPresented: $showPicker, onDismiss: {
-            Task { await mergeAndSave() }
-        }) {
+        .sheet(isPresented: $showPicker) {
             NavigationStack {
                 VStack(spacing: 0) {
-                    Text("Find and select \(domain) in the list below.")
+                    Text("Find and select \"\(domain)\" in the list below, then tap Add.")
                         .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal).padding(.vertical, 6)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal).padding(.vertical, 8)
                     FamilyActivityPicker(selection: $pickerSelection)
                 }
                 .navigationTitle("Add \(domain)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showPicker = false }
+                        Button("Add") {
+                            showPicker = false
+                            Task { await mergeAndSave() }
+                        }
                     }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") {
@@ -810,7 +812,9 @@ struct PendingWebsiteRow: View {
 
     private func mergeAndSave() async {
         #if !targetEnvironment(simulator)
-        guard !pickerSelection.webDomainTokens.isEmpty else { return }
+        let hasWebTokens = !pickerSelection.webDomainTokens.isEmpty
+        let hasCategoryTokens = !pickerSelection.categoryTokens.isEmpty
+        guard hasWebTokens || hasCategoryTokens else { return }
         isAdding = true
 
         // Load existing whitelist selection
@@ -853,6 +857,9 @@ struct PendingWebsiteRow: View {
 
         // Remove this domain from pending list
         await syncService.removePendingWebsite(pushKey: pushKey)
+
+        // Reset picker so onDismiss doesn't re-trigger a double-save
+        pickerSelection = FamilyActivitySelection()
 
         isAdding = false
         added = true
