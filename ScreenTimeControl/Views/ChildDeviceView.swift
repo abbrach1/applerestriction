@@ -328,7 +328,6 @@ struct ChildDeviceView: View {
                     // Emergency bypass code entry (hidden-ish — below unlock request)
                     Button {
                         bypassCode = ""
-                        bypassResult = nil
                         showBypassEntry = true
                     } label: {
                         HStack(spacing: 10) {
