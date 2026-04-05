@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import StoreKit
 
 #if !targetEnvironment(simulator)
 import FamilyControls
@@ -112,6 +113,20 @@ struct ChildDeviceView: View {
                         Label("Website Requests from Admin", systemImage: "globe.badge.exclamationmark")
                     } footer: {
                         Text("Tap Allow to instantly add the site to your whitelist. The Safari content blocker updates immediately — no picker required.")
+                    }
+                }
+
+                // Apps pushed by admin
+                if !syncService.pendingApps.isEmpty {
+                    Section {
+                        ForEach(Array(syncService.pendingApps), id: \.key) { pushKey, app in
+                            PendingAppRow(pushKey: pushKey, app: app)
+                                .environmentObject(syncService)
+                        }
+                    } header: {
+                        Label("Apps from Admin", systemImage: "arrow.down.app.fill")
+                    } footer: {
+                        Text("Tap Get to install directly without leaving B-SAFE. Swipe to dismiss after installing.")
                     }
                 }
 
@@ -837,6 +852,100 @@ struct PendingWebsiteRow: View {
 
         isAdding = false
         added = true
+    }
+}
+
+// MARK: - Pending App Row
+
+struct PendingAppRow: View {
+    let pushKey: String
+    let app: RecommendedApp
+    @EnvironmentObject var syncService: RemoteSyncService
+
+    @State private var showStore = false
+    @State private var isDismissing = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: URL(string: app.iconURL)) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(Image(systemName: "app").foregroundStyle(.secondary))
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(app.appName)
+                    .font(.subheadline).fontWeight(.medium)
+                if !app.category.isEmpty {
+                    Text(app.category)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if !app.sellerName.isEmpty {
+                    Text(app.sellerName)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                showStore = true
+            } label: {
+                Text("GET")
+                    .font(.subheadline).fontWeight(.bold)
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                isDismissing = true
+                Task {
+                    await syncService.removePendingApp(pushKey: pushKey)
+                    isDismissing = false
+                }
+            } label: {
+                Label("Dismiss", systemImage: "xmark")
+            }
+        }
+        .sheet(isPresented: $showStore) {
+            AppStoreSheet(appStoreID: app.appStoreID)
+        }
+    }
+}
+
+// MARK: - App Store Sheet (SKStoreProductViewController wrapper)
+
+struct AppStoreSheet: UIViewControllerRepresentable {
+    let appStoreID: String
+    @Environment(\.dismiss) var dismiss
+
+    func makeUIViewController(context: Context) -> SKStoreProductViewController {
+        let vc = SKStoreProductViewController()
+        vc.delegate = context.coordinator
+        vc.loadProduct(withParameters: [
+            SKStoreProductParameterITunesItemIdentifier: appStoreID
+        ], completionBlock: nil)
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: SKStoreProductViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(dismiss: dismiss) }
+
+    class Coordinator: NSObject, SKStoreProductViewControllerDelegate {
+        let dismiss: DismissAction
+        init(dismiss: DismissAction) { self.dismiss = dismiss }
+        func productViewControllerDidFinish(_ viewController: SKStoreProductViewController) {
+            dismiss()
+        }
     }
 }
 

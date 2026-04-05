@@ -20,7 +20,8 @@ class RemoteSyncService: ObservableObject {
     @Published var pendingCommands: [RemoteCommand] = []
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
-    @Published var pendingWebsites: [String: String] = [:]  // [pushKey: domain]
+    @Published var pendingWebsites: [String: String] = [:]       // [pushKey: domain]
+    @Published var pendingApps: [String: RecommendedApp] = [:]   // [pushKey: app]
 
     /// Firebase Realtime Database URL
     private static let defaultFirebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
@@ -229,8 +230,9 @@ class RemoteSyncService: ObservableObject {
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
         async let websitesFetch: Void = loadPendingWebsites()
+        async let appsFetch: Void = loadPendingApps()
         async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
-        let (fetchedConfig, _, _) = await (configFetch, websitesFetch, notifFetch)
+        let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
         if let config = fetchedConfig {
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
             await checkDNSTamper(config: config, uid: user.uid, idToken: token)
@@ -294,6 +296,34 @@ class RemoteSyncService: ObservableObject {
         pendingWebsites.removeValue(forKey: pushKey)
     }
 
+    func loadPendingApps() async {
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        guard let url = URL(string: "\(firebaseURL)/users/\(user.uid)/pendingApps.json?auth=\(token)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var result: [String: RecommendedApp] = [:]
+            for (key, val) in dict {
+                if let d = try? JSONSerialization.data(withJSONObject: val),
+                   let app = try? decoder.decode(RecommendedApp.self, from: d) {
+                    result[key] = app
+                }
+            }
+            pendingApps = result
+        } else {
+            pendingApps = [:]
+        }
+    }
+
+    func removePendingApp(pushKey: String) async {
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        try? await firebaseDelete(path: "users/\(user.uid)/pendingApps/\(pushKey)", idToken: token)
+        pendingApps.removeValue(forKey: pushKey)
+    }
+
     /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
     func manualSync() async {
         let commands = await checkForCommands()
@@ -304,8 +334,9 @@ class RemoteSyncService: ObservableObject {
         let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
         async let configFetch = loadUserSettings(uid: user.uid, idToken: token)
         async let websitesFetch: Void = loadPendingWebsites()
+        async let appsFetch: Void = loadPendingApps()
         async let notifFetch: Void = deliverPendingNotifications(uid: user.uid, idToken: token)
-        let (fetchedConfig, _, _) = await (configFetch, websitesFetch, notifFetch)
+        let (fetchedConfig, _, _, _) = await (configFetch, websitesFetch, appsFetch, notifFetch)
         if let fetchedConfig {
             ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(fetchedConfig)
         }

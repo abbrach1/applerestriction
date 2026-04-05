@@ -144,6 +144,31 @@ extension TamperAlert {
     }
 }
 
+// MARK: - Recommended App (admin → child, stored at /users/uid/pendingApps/{pushKey})
+
+struct RecommendedApp: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var appStoreID: String = ""     // numeric trackId as String, e.g. "389801252"
+    var appName: String = ""
+    var iconURL: String = ""        // artworkUrl100
+    var category: String = ""
+    var sellerName: String = ""
+    var timestamp: Date = Date()
+}
+
+extension RecommendedApp {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try c.decodeIfPresent(String.self, forKey: .id)         ?? UUID().uuidString
+        appStoreID = try c.decodeIfPresent(String.self, forKey: .appStoreID) ?? ""
+        appName    = try c.decodeIfPresent(String.self, forKey: .appName)    ?? ""
+        iconURL    = try c.decodeIfPresent(String.self, forKey: .iconURL)    ?? ""
+        category   = try c.decodeIfPresent(String.self, forKey: .category)   ?? ""
+        sellerName = try c.decodeIfPresent(String.self, forKey: .sellerName) ?? ""
+        timestamp  = try c.decodeIfPresent(Date.self,   forKey: .timestamp)  ?? Date()
+    }
+}
+
 // MARK: - Admin Notification (admin → child, stored at /users/uid/notifications/{pushKey})
 
 struct AdminNotification: Codable, Identifiable {

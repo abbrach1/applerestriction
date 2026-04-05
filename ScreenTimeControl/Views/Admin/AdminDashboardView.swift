@@ -870,14 +870,123 @@ struct DowntimeTab: View {
 
 // MARK: - Apps Tab
 
+// Local model for iTunes Search API results — not stored in Firebase
+struct AppSearchResult: Identifiable {
+    let id: String        // trackId as String
+    let name: String
+    let iconURL: String
+    let category: String
+    let sellerName: String
+}
+
 struct AppsTab: View {
     @ObservedObject var vm: AdminUserViewModel
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
     @State private var showingPicker = false
 
+    // App search / push state
+    @State private var appSearchQuery = ""
+    @State private var searchResults: [AppSearchResult] = []
+    @State private var isSearching = false
+    @State private var searchError: String?
+    @State private var pendingApps: [String: RecommendedApp] = [:]
+    @State private var pushingAppID: String?   // appStoreID currently being sent
+    @FocusState private var searchFocused: Bool
+
+    private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
     var body: some View {
         List {
+            // Recommend App section
+            Section {
+                HStack {
+                    TextField("Search App Store...", text: $appSearchQuery)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($searchFocused)
+                        .onSubmit { Task { await searchApps() } }
+                    Button {
+                        Task { await searchApps() }
+                    } label: {
+                        if isSearching { ProgressView().scaleEffect(0.8) }
+                        else { Text("Search") }
+                    }
+                    .disabled(appSearchQuery.trimmingCharacters(in: .whitespaces).isEmpty || isSearching)
+                }
+
+                if let err = searchError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+
+                ForEach(searchResults) { result in
+                    HStack(spacing: 10) {
+                        AsyncImage(url: URL(string: result.iconURL)) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.gray.opacity(0.2))
+                        }
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.name)
+                                .font(.subheadline).fontWeight(.medium)
+                            Text(result.category)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            Task { await pushApp(result) }
+                        } label: {
+                            if pushingAppID == result.id {
+                                ProgressView().scaleEffect(0.8)
+                            } else if pendingApps.values.contains(where: { $0.appStoreID == result.id }) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            } else {
+                                Text("Send")
+                                    .font(.caption).fontWeight(.semibold)
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(Color.blue.opacity(0.12))
+                                    .foregroundStyle(.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                        .disabled(pushingAppID == result.id ||
+                                  pendingApps.values.contains(where: { $0.appStoreID == result.id }))
+                    }
+                }
+
+                if !pendingApps.isEmpty {
+                    ForEach(Array(pendingApps), id: \.key) { pushKey, app in
+                        HStack(spacing: 10) {
+                            AsyncImage(url: URL(string: app.iconURL)) { image in
+                                image.resizable().scaledToFill()
+                            } placeholder: {
+                                RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.2))
+                            }
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(app.appName).font(.subheadline)
+                                Text("Pending on device").font(.caption).foregroundStyle(.orange)
+                            }
+                            Spacer()
+                            Button("Remove", role: .destructive) {
+                                Task { await removePendingApp(pushKey: pushKey) }
+                            }
+                            .font(.caption)
+                        }
+                    }
+                }
+            } header: {
+                Text("Recommend an App")
+            } footer: {
+                Text("Search the App Store and send apps directly to this device. The child will see them and can install with one tap inside B-SAFE.")
+            }
+
             // App Review Request (child-submitted)
             if let report = vm.appListReport {
                 Section {
@@ -1021,6 +1130,7 @@ struct AppsTab: View {
         .task {
             let token = await auth.freshToken() ?? ""
             await vm.loadAppList(uid: user.uid, idToken: token)
+            await loadPendingApps()
         }
     }
 }
@@ -1058,6 +1168,102 @@ extension CommandsTab {
         notifSent = true
         try? await Task.sleep(nanoseconds: 2_500_000_000)
         notifSent = false
+    }
+}
+
+// MARK: - AppsTab helpers
+
+extension AppsTab {
+    func searchApps() async {
+        let query = appSearchQuery.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+        isSearching = true
+        searchError = nil
+        searchResults = []
+        searchFocused = false
+
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=software&limit=20&country=us") else {
+            isSearching = false; return
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["results"] as? [[String: Any]] else {
+            searchError = "Search failed. Check your connection."
+            isSearching = false; return
+        }
+
+        searchResults = results.compactMap { item in
+            guard let trackId = item["trackId"] as? Int,
+                  let name = item["trackName"] as? String else { return nil }
+            return AppSearchResult(
+                id: String(trackId),
+                name: name,
+                iconURL: item["artworkUrl100"] as? String ?? "",
+                category: item["primaryGenreName"] as? String ?? "",
+                sellerName: item["sellerName"] as? String ?? ""
+            )
+        }
+
+        if searchResults.isEmpty { searchError = "No apps found for \"\(query)\"." }
+        isSearching = false
+    }
+
+    func pushApp(_ result: AppSearchResult) async {
+        // Don't push duplicates
+        guard !pendingApps.values.contains(where: { $0.appStoreID == result.id }) else { return }
+        pushingAppID = result.id
+        let token = await auth.freshToken() ?? ""
+        let app = RecommendedApp(
+            appStoreID: result.id,
+            appName: result.name,
+            iconURL: result.iconURL,
+            category: result.category,
+            sellerName: result.sellerName,
+            timestamp: Date()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(app),
+              let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingApps.json?auth=\(token)") else {
+            pushingAppID = nil; return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
+        pushingAppID = nil
+        await loadPendingApps()
+    }
+
+    func loadPendingApps() async {
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingApps.json?auth=\(token)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var result: [String: RecommendedApp] = [:]
+            for (key, val) in dict {
+                if let d = try? JSONSerialization.data(withJSONObject: val),
+                   let app = try? decoder.decode(RecommendedApp.self, from: d) {
+                    result[key] = app
+                }
+            }
+            pendingApps = result
+        } else {
+            pendingApps = [:]
+        }
+    }
+
+    func removePendingApp(pushKey: String) async {
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingApps/\(pushKey).json?auth=\(token)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        pendingApps.removeValue(forKey: pushKey)
     }
 }
 
