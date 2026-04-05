@@ -39,36 +39,95 @@ class AdminUserViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isSaving = false
     @Published var savedSection: String?
+    @Published var lastError: String?
 
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+    private let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .millisecondsSince1970
+        return e
+    }()
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .millisecondsSince1970
+        return d
+    }()
+
+    // MARK: - Local persistence (survives Firebase failures)
+
+    private func localKey(uid: String) -> String { "admin.config.\(uid)" }
+
+    private func saveLocally(uid: String) {
+        if let data = try? encoder.encode(config) {
+            UserDefaults.standard.set(data, forKey: localKey(uid: uid))
+        }
+    }
+
+    private func loadLocally(uid: String) {
+        if let data = UserDefaults.standard.data(forKey: localKey(uid: uid)),
+           let saved = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
+            config = saved
+        }
+    }
+
+    // MARK: - Load
 
     func load(uid: String, idToken: String) async {
+        // Show local copy immediately — no blank flash while waiting for network
+        loadLocally(uid: uid)
         isLoading = true
-        guard let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else { isLoading = false; return }
-        if let (data, _) = try? await URLSession.shared.data(from: url) {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .millisecondsSince1970
-            if let decoded = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
-                config = decoded
+        lastError = nil
+
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else {
+            isLoading = false; return
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+                lastError = "Session expired — try signing out and back in"
+                isLoading = false; return
             }
+            if let remote = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
+                config = remote
+                saveLocally(uid: uid)  // Keep local copy in sync
+            }
+            // If decode fails (null or empty), local copy already shown — no reset
+        } catch {
+            lastError = "Could not reach Firebase: \(error.localizedDescription)"
         }
         isLoading = false
     }
 
+    // MARK: - Save & Command
+
     func saveAndSendCommand(_ commandType: RemoteCommand.CommandType, uid: String, idToken: String, section: String) async {
         isSaving = true
-        // Encode directly — no intermediate [String:Any] roundtrip that can lose Set/Date types
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        if let encoded = try? encoder.encode(config),
-           let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") {
-            var req = URLRequest(url: url)
-            req.httpMethod = "PUT"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = encoded
-            _ = try? await URLSession.shared.data(for: req)
+        lastError = nil
+
+        guard let encoded = try? encoder.encode(config),
+              let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else {
+            lastError = "Failed to encode settings"
+            isSaving = false; return
         }
-        // Send command to child device
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            if let http = response as? HTTPURLResponse, !(200..<300 ~= http.statusCode) {
+                lastError = "Save failed (HTTP \(http.statusCode)) — try again"
+                isSaving = false; return
+            }
+            // Save succeeded — persist locally too
+            saveLocally(uid: uid)
+        } catch {
+            lastError = "Network error: \(error.localizedDescription)"
+            isSaving = false; return
+        }
+
         await sendCommand(commandType, uid: uid, idToken: idToken)
         savedSection = section
         isSaving = false
@@ -78,8 +137,6 @@ class AdminUserViewModel: ObservableObject {
 
     func sendCommand(_ type: RemoteCommand.CommandType, uid: String, idToken: String) async {
         let cmd = RemoteCommand(type: type)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .millisecondsSince1970
         guard let encoded = try? encoder.encode(cmd),
               let url = URL(string: "\(dbURL)/users/\(uid)/commands.json?auth=\(idToken)") else { return }
         var req = URLRequest(url: url)
@@ -196,6 +253,17 @@ struct AdminUserControlView: View {
             .padding(.horizontal)
             .padding(.vertical, 10)
             .background(.quaternary)
+
+            // Error banner
+            if let err = vm.lastError {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(.red)
+            }
 
             // Tab picker
             Picker("Section", selection: $selectedTab) {
