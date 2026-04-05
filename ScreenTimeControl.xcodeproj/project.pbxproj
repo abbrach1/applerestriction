@@ -29,7 +29,6 @@
 		A10023 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10023 /* LoginView.swift */; };
 		A10024 /* AdminDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10024 /* AdminDashboardView.swift */; };
 		A10030 /* ChildDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10030 /* ChildDeviceView.swift */; };
-		BDCBC99C2F82C050000E9E56 /* GoogleService-Info 2.plist in Resources */ = {isa = PBXBuildFile; fileRef = BDCBC99B2F82C050000E9E56 /* GoogleService-Info 2.plist */; };
 		BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -95,7 +94,6 @@
 		B40002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B40003 /* ShieldAction.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldAction.entitlements; sourceTree = "<group>"; };
 		B40004 /* ShieldAction-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShieldAction-Simulator.entitlements"; sourceTree = "<group>"; };
-		BDCBC99B2F82C050000E9E56 /* GoogleService-Info 2.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info 2.plist"; sourceTree = "<group>"; };
 		BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BSAFEContentBlocker.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000 /* ScreenTimeControl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScreenTimeControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000 /* DeviceActivityMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -159,7 +157,6 @@
 				B10019 /* Info.plist */,
 				B10020 /* ScreenTimeControl.entitlements */,
 				B10021 /* ScreenTimeControl-Simulator.entitlements */,
-				BDCBC99B2F82C050000E9E56 /* GoogleService-Info 2.plist */,
 			);
 			path = ScreenTimeControl;
 			sourceTree = "<group>";
@@ -399,7 +396,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10018 /* Assets.xcassets in Resources */,
-				BDCBC99C2F82C050000E9E56 /* GoogleService-Info 2.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
