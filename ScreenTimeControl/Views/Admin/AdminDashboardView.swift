@@ -293,8 +293,10 @@ class AdminUserViewModel: ObservableObject {
         if !config.allowedWebsites.contains(domain) {
             config.allowedWebsites.append(domain)
         }
+        // Switch to whitelist mode so the domain is actually enforced (and visible in the list)
+        config.websiteFilterMode = .whitelist
         // Save updated settings to Firebase
-        await saveAndSendCommand(.refreshSettings, uid: uid, idToken: idToken, section: "website_approved")
+        await saveAndSendCommand(.updateWebsites, uid: uid, idToken: idToken, section: "website_approved")
         // Delete the request
         guard let url = URL(string: "\(dbURL)/users/\(uid)/websiteRequests/\(pushKey).json?auth=\(idToken)") else { return }
         var req = URLRequest(url: url); req.httpMethod = "DELETE"
@@ -502,14 +504,9 @@ struct AdminDashboardView: View {
                             Button {
                                 Task {
                                     let token = await auth.freshToken() ?? ""
-                                    guard let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)") else { return }
-                                    var req = URLRequest(url: url)
-                                    req.httpMethod = "PUT"
-                                    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                                    req.httpBody = "\"\(fcmServerKey)\"".data(using: .utf8)
-                                    _ = try? await URLSession.shared.data(for: req)
+                                    await saveFCMServerKey(token: token)
                                     fcmSaved = true
-                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    _ = try? await Task.sleep(nanoseconds: 2_000_000_000)
                                     fcmSaved = false
                                 }
                             } label: {
@@ -544,36 +541,36 @@ struct AdminDashboardView: View {
                 }
             }
             .task {
+                // Load server key from UserDefaults first (instant, no network)
+                if let local = UserDefaults.standard.string(forKey: "bsafe.fcmServerKey"), !local.isEmpty {
+                    fcmServerKey = local
+                }
                 let token = await auth.freshToken() ?? ""
                 await vm.loadUsers(idToken: token)
-                // Register this device's FCM token so child can push notifications to admin
-                await registerAdminFCMToken(idToken: token)
-                // Pre-fill server key if already saved
+                // Then refresh from Firebase (may be newer)
                 if let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)"),
                    let (data, _) = try? await URLSession.shared.data(from: url),
-                   let key = try? JSONDecoder().decode(String.self, from: data) {
+                   let key = try? JSONDecoder().decode(String.self, from: data),
+                   !key.isEmpty {
                     fcmServerKey = key
+                    UserDefaults.standard.set(key, forKey: "bsafe.fcmServerKey")
                 }
             }
         }
     }
 
-    private func registerAdminFCMToken(idToken: String) async {
-        // Attempt to get FCM token via UIApplication APNs token stored by Firebase SDK.
-        // For this to work, ensure the app has Push Notifications capability and
-        // FirebaseMessaging is in the project (File > Add Package > firebase-ios-sdk > FirebaseMessaging).
-        //
-        // If FirebaseMessaging is not yet added, this block is safely skipped at runtime.
-        guard let tokenClass = NSClassFromString("FIRMessaging") as? NSObject.Type,
-              let messaging = tokenClass.value(forKey: "messaging") as? NSObject else { return }
-        if let fcmToken = messaging.value(forKey: "FCMToken") as? String, !fcmToken.isEmpty {
-            guard let url = URL(string: "\(dbURL)/adminConfig/fcmToken.json?auth=\(idToken)") else { return }
-            var req = URLRequest(url: url)
-            req.httpMethod = "PUT"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = "\"\(fcmToken)\"".data(using: .utf8)
-            _ = try? await URLSession.shared.data(for: req)
-        }
+    private func saveFCMServerKey(token: String) async {
+        let trimmed = fcmServerKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Save locally so it persists without network
+        UserDefaults.standard.set(trimmed, forKey: "bsafe.fcmServerKey")
+        // Also push to Firebase so other devices can sync
+        guard let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "\"\(trimmed)\"".data(using: .utf8)
+        _ = try? await URLSession.shared.data(for: req)
     }
 }
 
@@ -821,6 +818,63 @@ struct WebsiteTab: View {
                 }
             }
 
+            // DNS Settings — prominently placed so they're easy to find
+            Section {
+                Toggle(isOn: $vm.config.forceDNS) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Force NextDNS")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Blocks domains system-wide across all apps, not just Safari")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
+                    }
+                }
+
+                if vm.config.forceDNS {
+                    HStack {
+                        Image(systemName: "person.badge.key.fill").foregroundStyle(.purple).frame(width: 28)
+                        TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
+                            .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
+                    }
+                    HStack {
+                        Image(systemName: "key.fill").foregroundStyle(.purple).frame(width: 28)
+                        SecureField("NextDNS API Key", text: $vm.config.nextDNSApiKey)
+                            .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
+                    }
+                    Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Alert Me If Removed").font(.subheadline).fontWeight(.medium)
+                                Text("Sends a tamper alert if the child removes the DNS profile")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "bell.badge.fill").foregroundStyle(.orange) }
+                    }
+                    Toggle(isOn: $vm.config.dnsAutoReapply) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Auto Re-Apply If Removed").font(.subheadline).fontWeight(.medium)
+                                Text("Attempts to reinstall the profile automatically (child must approve)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green) }
+                    }
+                }
+            } header: {
+                Text("DNS Filter")
+            } footer: {
+                if vm.config.forceDNS {
+                    Text("Find your Profile ID at nextdns.io → your profile → Setup.")
+                        .font(.caption)
+                } else {
+                    Text("NextDNS blocks domains system-wide across all apps. Toggle on to configure.")
+                        .font(.caption)
+                }
+            }
+
             if vm.config.websiteFilterMode == .blacklist {
                 Section("Blocked Sites") {
                     ForEach(vm.config.blockedWebsites, id: \.self) { domain in
@@ -936,79 +990,6 @@ struct WebsiteTab: View {
                     }
                 }
             } header: { Text("Extra Protection") }
-
-            Section {
-                Toggle(isOn: $vm.config.forceDNS) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Force NextDNS")
-                                .font(.subheadline).fontWeight(.medium)
-                            Text("Blocks domains system-wide across all apps, not just Safari")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
-                    }
-                }
-
-                if vm.config.forceDNS {
-                    HStack {
-                        Image(systemName: "person.badge.key.fill")
-                            .foregroundStyle(.purple)
-                            .frame(width: 28)
-                        TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .font(.subheadline)
-                    }
-
-                    HStack {
-                        Image(systemName: "key.fill")
-                            .foregroundStyle(.purple)
-                            .frame(width: 28)
-                        SecureField("NextDNS API Key", text: $vm.config.nextDNSApiKey)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .font(.subheadline)
-                    }
-
-                    Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Alert Me If Removed")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Sends a tamper alert if the child removes the DNS profile")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
-                        }
-                    }
-
-                    Toggle(isOn: $vm.config.dnsAutoReapply) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Auto Re-Apply If Removed")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Attempts to reinstall the profile automatically (child must approve)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green)
-                        }
-                    }
-                }
-            } header: {
-                Text("NextDNS")
-            } footer: {
-                if vm.config.forceDNS {
-                    Text("Find your Profile ID at nextdns.io → your profile → Setup. Each device can have its own profile for custom filtering rules.")
-                        .font(.caption)
-                } else {
-                    Text("NextDNS filters domains system-wide. Create a free account at nextdns.io for custom blocklists and analytics.")
-                        .font(.caption)
-                }
-            }
 
             Section {
                 ApplyButton(label: "Apply Website Settings",
