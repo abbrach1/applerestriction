@@ -88,11 +88,27 @@ class RemoteSyncService: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         stopListening()
 
-        // .info/connected — true when WebSocket is connected to Firebase servers
+        // .info/connected — true when WebSocket is connected to Firebase servers.
+        // Uses the standard Firebase presence pattern: on connect, mark online and
+        // queue an onDisconnect write so the server flips isOnline=false automatically
+        // when the WebSocket drops (app background, killed, no internet, etc).
         let connRef = Database.database().reference(withPath: ".info/connected")
+        let infoRef = dbRef.child("users/\(uid)/info")
+
         connectedHandle = connRef.observe(.value) { [weak self] snapshot in
             Task { @MainActor [weak self] in
-                self?.isOnline = snapshot.value as? Bool ?? false
+                let connected = snapshot.value as? Bool ?? false
+                self?.isOnline = connected
+                if connected {
+                    // Re-assert online status and (re-)queue disconnect handler.
+                    // Must re-queue each time we reconnect because onDisconnect is
+                    // consumed once by the server when the connection drops.
+                    infoRef.child("isOnline").setValue(true)
+                    infoRef.onDisconnectUpdateChildValues([
+                        "isOnline": false,
+                        "lastSeen": ServerValue.timestamp()
+                    ])
+                }
             }
         }
 
@@ -172,6 +188,14 @@ class RemoteSyncService: ObservableObject {
         if let h = connectedHandle {
             Database.database().reference(withPath: ".info/connected").removeObserver(withHandle: h)
             connectedHandle = nil
+        }
+        // If the user explicitly signs out, immediately mark offline and cancel
+        // the server-side onDisconnect (which would otherwise fire redundantly).
+        if let uid = Auth.auth().currentUser?.uid {
+            let infoRef = dbRef.child("users/\(uid)/info")
+            infoRef.child("isOnline").setValue(false)
+            infoRef.child("lastSeen").setValue(ISO8601DateFormatter().string(from: Date()))
+            infoRef.cancelDisconnectOperations()
         }
     }
 
