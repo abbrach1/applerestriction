@@ -237,9 +237,12 @@ class RemoteSyncService: ObservableObject {
     /// Load the admin-saved ScreenTimeConfiguration for a user from Firebase
     func loadUserSettings(uid: String, idToken: String) async -> ScreenTimeConfiguration? {
         guard let url = URL(string: "\(firebaseURL)/users/\(uid)/settings.json?auth=\(idToken)") else { return nil }
-        if let (data, _) = try? await URLSession.shared.data(from: url),
-           let config = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data) {
-            return config
+        if let (data, _) = try? await URLSession.shared.data(from: url) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            if let config = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
+                return config
+            }
         }
         return nil
     }

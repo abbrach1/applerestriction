@@ -45,23 +45,27 @@ class AdminUserViewModel: ObservableObject {
     func load(uid: String, idToken: String) async {
         isLoading = true
         guard let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else { isLoading = false; return }
-        if let (data, _) = try? await URLSession.shared.data(from: url),
-           let decoded = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data) {
-            config = decoded
+        if let (data, _) = try? await URLSession.shared.data(from: url) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            if let decoded = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
+                config = decoded
+            }
         }
         isLoading = false
     }
 
     func saveAndSendCommand(_ commandType: RemoteCommand.CommandType, uid: String, idToken: String, section: String) async {
         isSaving = true
-        // Save full config to Firebase
-        if let encoded = try? JSONEncoder().encode(config),
-           let dict = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any],
+        // Encode directly — no intermediate [String:Any] roundtrip that can lose Set/Date types
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let encoded = try? encoder.encode(config),
            let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") {
             var req = URLRequest(url: url)
             req.httpMethod = "PUT"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try? JSONSerialization.data(withJSONObject: dict)
+            req.httpBody = encoded
             _ = try? await URLSession.shared.data(for: req)
         }
         // Send command to child device
@@ -74,13 +78,14 @@ class AdminUserViewModel: ObservableObject {
 
     func sendCommand(_ type: RemoteCommand.CommandType, uid: String, idToken: String) async {
         let cmd = RemoteCommand(type: type)
-        guard let encoded = try? JSONEncoder().encode(cmd),
-              let dict = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any],
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let encoded = try? encoder.encode(cmd),
               let url = URL(string: "\(dbURL)/users/\(uid)/commands.json?auth=\(idToken)") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: dict)
+        req.httpBody = encoded
         _ = try? await URLSession.shared.data(for: req)
     }
 }
