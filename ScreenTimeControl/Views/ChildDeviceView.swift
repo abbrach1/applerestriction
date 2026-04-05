@@ -41,11 +41,9 @@ struct ChildDeviceView: View {
             mainTab(config: config)
                 .tabItem { Label("Home", systemImage: "shield.checkered") }
 
-            if config.websiteFilterMode == .whitelist && !config.allowedWebsites.isEmpty {
-                SafeBrowserView()
-                    .environmentObject(settingsManager)
-                    .tabItem { Label("Browser", systemImage: "globe") }
-            }
+            SafeBrowserView()
+                .environmentObject(settingsManager)
+                .tabItem { Label("Browser", systemImage: "globe") }
         }
         .tint(Color(red: 0, green: 0.4, blue: 0.15))
     }
