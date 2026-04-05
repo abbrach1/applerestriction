@@ -615,7 +615,7 @@ struct WebsiteTab: View {
         isSendingDomain = true
         let token = await auth.freshToken() ?? ""
         guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)"),
-              let body = try? JSONSerialization.data(withJSONObject: domain) else {
+              let body = try? JSONEncoder().encode(domain) else {
             isSendingDomain = false; return
         }
         var req = URLRequest(url: url)
