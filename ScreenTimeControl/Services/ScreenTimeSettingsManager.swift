@@ -208,6 +208,18 @@ class ScreenTimeSettingsManager: ObservableObject {
         saveConfiguration()
     }
 
+    // MARK: - Installation Block Override
+
+    /// When admin pushes apps, temporarily lift denyAppInstallation so they can install.
+    /// Called by ChildDeviceView whenever pendingApps list changes.
+    func updateInstallationBlock(hasPendingAdminApps: Bool) {
+        if hasPendingAdminApps {
+            store.application.denyAppInstallation = false
+        } else {
+            store.application.denyAppInstallation = configuration.blockNewApps
+        }
+    }
+
     // MARK: - Remote Configuration
 
     func applyRemoteConfiguration(_ config: ScreenTimeConfiguration) {

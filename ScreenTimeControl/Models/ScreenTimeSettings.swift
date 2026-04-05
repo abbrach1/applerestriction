@@ -27,8 +27,8 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var contentBlockerEnabled: Bool = false
     var forceDNS: Bool = false
     var nextDNSProfileID: String = ""       // NextDNS profile ID, e.g. "abc123"
-    var dnsAlertOnRemoval: Bool = false     // notify admin if child removes DNS profile
-    var dnsAutoReapply: Bool = false        // automatically re-install DNS profile if removed
+    var dnsAlertOnRemoval: Bool = true      // notify admin if child removes DNS profile
+    var dnsAutoReapply: Bool = true         // automatically re-install DNS profile if removed
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -53,8 +53,8 @@ extension ScreenTimeConfiguration {
         contentBlockerEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .contentBlockerEnabled)  ?? false
         forceDNS               = try c.decodeIfPresent(Bool.self,   forKey: .forceDNS)               ?? false
         nextDNSProfileID       = try c.decodeIfPresent(String.self, forKey: .nextDNSProfileID)       ?? ""
-        dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? false
-        dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? false
+        dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? true
+        dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? true
     }
 }
 

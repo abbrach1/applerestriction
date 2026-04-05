@@ -33,7 +33,51 @@ class RemoteSyncService: ObservableObject {
     // Still used by admin REST calls and manualSync fallback
     private let firebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
-    private init() {}
+    private init() {
+        // Re-check DNS profile whenever app returns to foreground
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.recheckDNSOnForeground()
+            }
+        }
+    }
+
+    #if !targetEnvironment(simulator)
+    private func recheckDNSOnForeground() async {
+        guard let uid = Auth.auth().currentUser?.uid,
+              let config = try? await Database.database()
+                .reference(withPath: "users/\(uid)/settings")
+                .getData()
+                .value as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: config),
+              let settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data),
+              settings.forceDNS else { return }
+        let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
+        guard !isEnabled else { return }
+        // DNS was removed — auto-reapply
+        if settings.dnsAutoReapply {
+            await ContentBlockerService.shared.enableForcedDNS(profileID: settings.nextDNSProfileID)
+        }
+        // Alert admin
+        if settings.dnsAlertOnRemoval {
+            let alert = TamperAlert(type: "dns_removed",
+                                   message: "DNS filter was removed and auto-reapplied.",
+                                   timestamp: Date())
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .millisecondsSince1970
+            if let d = try? encoder.encode(alert),
+               let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+            }
+        }
+    }
+    #else
+    private func recheckDNSOnForeground() async {}
+    #endif
 
     // MARK: - Real-time Listeners
 

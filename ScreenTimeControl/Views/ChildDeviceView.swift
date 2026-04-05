@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import StoreKit
+import SafariServices
 
 #if !targetEnvironment(simulator)
 import FamilyControls
@@ -16,6 +17,7 @@ struct ChildDeviceView: View {
     @State private var showSendAppList = false
     @State private var isSendingList = false
     @State private var listSentMessage: String?
+    @State private var contentBlockerEnabled: Bool = true  // assume enabled until checked
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -144,6 +146,24 @@ struct ChildDeviceView: View {
                     }
                 }
 
+                // Content blocker warning — only shown in whitelist mode when extension is off
+                if config.websiteFilterMode == .whitelist && !contentBlockerEnabled {
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .foregroundStyle(.red)
+                                .font(.title3)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Website filter not active")
+                                    .font(.subheadline).fontWeight(.semibold)
+                                Text("Go to Settings → Safari → Extensions → enable B-SAFE Content Blocker")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 // Apps pushed by admin
                 if !syncService.pendingApps.isEmpty {
                     Section {
@@ -202,6 +222,13 @@ struct ChildDeviceView: View {
             }
             .navigationTitle("B-SAFE")
             .navigationBarTitleDisplayMode(.large)
+            .task {
+                await checkContentBlockerState()
+                updateInstallationBlock()
+            }
+            .onChange(of: syncService.pendingApps.count) { _ in
+                updateInstallationBlock()
+            }
             .sheet(isPresented: $showAdminSetup) {
                 AdminSetupSheet()
                     .environmentObject(auth)
@@ -282,6 +309,24 @@ struct ChildDeviceView: View {
     }
 
     // MARK: - Helpers
+
+    /// Check if BSAFEContentBlocker is enabled in Safari settings.
+    private func checkContentBlockerState() async {
+        #if !targetEnvironment(simulator)
+        let id = "com.abbrachfeld.screentimecontrolabbrach.BSAFEContentBlocker"
+        if let state = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: id) {
+            contentBlockerEnabled = state.isEnabled
+        }
+        #endif
+    }
+
+    /// When admin has pushed apps, temporarily lift the install block so they can be installed.
+    /// Re-enables once the pending list is cleared.
+    private func updateInstallationBlock() {
+        #if !targetEnvironment(simulator)
+        settingsManager.updateInstallationBlock(hasPendingAdminApps: !syncService.pendingApps.isEmpty)
+        #endif
+    }
 
     private func isWebsiteFilterActive(_ config: ScreenTimeConfiguration) -> Bool {
         config.websiteFilterMode == .whitelist || !config.blockedWebsites.isEmpty
