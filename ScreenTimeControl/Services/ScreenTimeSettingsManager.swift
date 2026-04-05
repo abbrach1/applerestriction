@@ -5,8 +5,6 @@ import ManagedSettings
 import FamilyControls
 import Combine
 
-/// Manages Screen Time restrictions directly from the main app via ManagedSettingsStore.
-/// No extensions required — all blocking is applied immediately on command.
 @MainActor
 class ScreenTimeSettingsManager: ObservableObject {
     static let shared = ScreenTimeSettingsManager()
@@ -25,15 +23,30 @@ class ScreenTimeSettingsManager: ObservableObject {
         restoreActiveRestrictions()
     }
 
+    // MARK: - Convenience type aliases to avoid inference crashes
+
+    private typealias AppPolicy = ShieldSettings.ActivityCategoryPolicy<Application>
+    private typealias WebPolicy = ShieldSettings.ActivityCategoryPolicy<WebDomain>
+
     // MARK: - App Blocking
 
     func applyAppRestrictions() {
         let applications = selectedAppsToBlock.applicationTokens
         let categories = selectedAppsToBlock.categoryTokens
 
-        store.shield.applications = applications.isEmpty ? nil : applications
-        store.shield.applicationCategories = categories.isEmpty ? nil : .specific(categories)
-        store.shield.webDomainCategories = categories.isEmpty ? nil : .specific(categories)
+        if applications.isEmpty {
+            store.shield.applications = nil
+        } else {
+            store.shield.applications = applications
+        }
+
+        if categories.isEmpty {
+            store.shield.applicationCategories = nil
+            store.shield.webDomainCategories = nil
+        } else {
+            store.shield.applicationCategories = AppPolicy.specific(categories)
+            store.shield.webDomainCategories = WebPolicy.specific(categories)
+        }
 
         configuration.lastUpdated = Date()
         saveConfiguration()
@@ -48,7 +61,7 @@ class ScreenTimeSettingsManager: ObservableObject {
         saveConfiguration()
     }
 
-    // MARK: - Downtime (applied directly, checked every minute)
+    // MARK: - Downtime
 
     func setDowntimeSchedule(_ schedule: DowntimeSchedule) {
         configuration.downtimeSchedule = schedule
@@ -63,7 +76,6 @@ class ScreenTimeSettingsManager: ObservableObject {
         isDowntimeActive = false
         downtimeTimer?.invalidate()
         downtimeTimer = nil
-        // Only clear downtime shield, not app restrictions
         store.shield.applicationCategories = nil
         store.shield.webDomainCategories = nil
         saveConfiguration()
@@ -72,7 +84,10 @@ class ScreenTimeSettingsManager: ObservableObject {
     private func startDowntimeTimer() {
         downtimeTimer?.invalidate()
         downtimeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.checkAndApplyDowntime() }
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.checkAndApplyDowntime()
+            }
         }
     }
 
@@ -90,19 +105,17 @@ class ScreenTimeSettingsManager: ObservableObject {
         if startMinutes < endMinutes {
             inDowntime = currentMinutes >= startMinutes && currentMinutes < endMinutes
         } else {
-            // Overnight (e.g. 10pm - 7am)
             inDowntime = currentMinutes >= startMinutes || currentMinutes < endMinutes
         }
 
         if inDowntime && !isDowntimeActive {
-            store.shield.applicationCategories = .all()
-            store.shield.webDomainCategories = .all()
+            store.shield.applicationCategories = AppPolicy.all()
+            store.shield.webDomainCategories = WebPolicy.all()
             isDowntimeActive = true
         } else if !inDowntime && isDowntimeActive {
             store.shield.applicationCategories = nil
             store.shield.webDomainCategories = nil
             isDowntimeActive = false
-            // Re-apply any manual app restrictions
             applyAppRestrictions()
         }
     }
@@ -110,7 +123,6 @@ class ScreenTimeSettingsManager: ObservableObject {
     // MARK: - Time Limits
 
     func setTimeLimit(minutes: Int, for activityName: String) {
-        // Store limit in configuration — enforced via polling
         print("[B-SAFE] Time limit set: \(minutes) min for \(activityName)")
         saveConfiguration()
     }
@@ -118,8 +130,8 @@ class ScreenTimeSettingsManager: ObservableObject {
     // MARK: - Lock / Unlock All
 
     func lockAllApps() {
-        store.shield.applicationCategories = .all()
-        store.shield.webDomainCategories = .all()
+        store.shield.applicationCategories = AppPolicy.all()
+        store.shield.webDomainCategories = WebPolicy.all()
         isDowntimeActive = true
         configuration.lastUpdated = Date()
         saveConfiguration()
@@ -138,19 +150,21 @@ class ScreenTimeSettingsManager: ObservableObject {
     // MARK: - Website Blocking
 
     func applyWebsiteRestrictions() {
-        let config = configuration
-        if config.websiteFilterMode == .blacklist {
+        if configuration.websiteFilterMode == .blacklist {
             var webDomains = Set<WebDomain>()
-            for domainStr in config.blockedWebsites {
+            for domainStr in configuration.blockedWebsites {
                 webDomains.insert(WebDomain(domain: domainStr))
             }
-            store.shield.webDomains = webDomains.isEmpty ? nil : webDomains
+            if webDomains.isEmpty {
+                store.shield.webDomains = nil
+            } else {
+                store.shield.webDomains = webDomains
+            }
             if !isDowntimeActive {
                 store.shield.webDomainCategories = nil
             }
         } else {
-            // Whitelist mode: shield all web domain categories
-            store.shield.webDomainCategories = .all()
+            store.shield.webDomainCategories = WebPolicy.all()
             store.shield.webDomains = nil
         }
         saveConfiguration()
@@ -160,20 +174,16 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     func applyRemoteConfiguration(_ config: ScreenTimeConfiguration) {
         configuration = config
-        // App lock state
         if config.isLocked {
             lockAllApps()
             return
         }
-        // Downtime
         if config.downtimeEnabled {
             setDowntimeSchedule(config.downtimeSchedule)
         } else {
             disableDowntime()
         }
-        // Website restrictions
         applyWebsiteRestrictions()
-        // App restrictions
         applyAppRestrictions()
     }
 
