@@ -37,8 +37,8 @@ struct ScreenTimeControlApp: App {
                 ChildDeviceView()
                     .environmentObject(auth)
                     .environmentObject(syncService)
+                    .environmentObject(settingsManager)
                     .task {
-                        // Register/update device presence in Firebase
                         if let user = auth.currentUser {
                             let token = await auth.freshToken() ?? user.idToken
                             await syncService.registerDevice(uid: user.uid, email: user.email, idToken: token)

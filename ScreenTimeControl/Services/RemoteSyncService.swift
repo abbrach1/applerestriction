@@ -202,7 +202,7 @@ class RemoteSyncService: ObservableObject {
     // MARK: - Polling
 
     /// Child device: start polling Firebase for new commands
-    func startPolling(interval: TimeInterval = 30) {
+    func startPolling(interval: TimeInterval = 10) {
         stopPolling()
         // Apply latest saved settings immediately, then keep polling for commands
         Task { await manualSync() }
