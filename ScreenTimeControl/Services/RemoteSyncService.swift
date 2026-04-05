@@ -78,7 +78,7 @@ class RemoteSyncService: ObservableObject {
             guard let cmd = try? decoder.decode(RemoteCommand.self, from: data),
                   !cmd.executed else { return }
             await self.executeCommand(cmd)
-            snapshot.ref.removeValue()   // delete after executing — no re-delivery
+            try? await snapshot.ref.removeValue()   // delete after executing — no re-delivery
         }
 
         // Pending websites
@@ -115,7 +115,7 @@ class RemoteSyncService: ObservableObject {
             decoder.dateDecodingStrategy = .millisecondsSince1970
             guard let note = try? decoder.decode(AdminNotification.self, from: data) else { return }
             await self.deliverLocalNotification(note)
-            snapshot.ref.removeValue()   // delete after delivering
+            try? await snapshot.ref.removeValue()   // delete after delivering
         }
     }
 
@@ -162,7 +162,7 @@ class RemoteSyncService: ObservableObject {
             "isOnline": true,
             "lastSeen": ISO8601DateFormatter().string(from: Date())
         ]
-        dbRef.child("users/\(uid)/info").setValue(info)
+        try? await dbRef.child("users/\(uid)/info").setValue(info)
         isPaired = true
     }
 
@@ -191,13 +191,13 @@ class RemoteSyncService: ObservableObject {
 
     func removePendingWebsite(pushKey: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        dbRef.child("users/\(uid)/pendingWebsites/\(pushKey)").removeValue()
+        try? await dbRef.child("users/\(uid)/pendingWebsites/\(pushKey)").removeValue()
         pendingWebsites.removeValue(forKey: pushKey)
     }
 
     func removePendingApp(pushKey: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        dbRef.child("users/\(uid)/pendingApps/\(pushKey)").removeValue()
+        try? await dbRef.child("users/\(uid)/pendingApps/\(pushKey)").removeValue()
         pendingApps.removeValue(forKey: pushKey)
     }
 
@@ -252,7 +252,7 @@ class RemoteSyncService: ObservableObject {
             encoder.dateEncodingStrategy = .millisecondsSince1970
             if let data = try? encoder.encode(alert),
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+                try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
         }
 

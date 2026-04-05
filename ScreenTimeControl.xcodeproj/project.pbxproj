@@ -14,6 +14,7 @@
 		A10005 /* AuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10005 /* AuthorizationManager.swift */; };
 		A10006 /* ScreenTimeSettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10006 /* ScreenTimeSettingsManager.swift */; };
 		A10007 /* RemoteSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10007 /* RemoteSyncService.swift */; };
+		A10040 /* ContentBlockerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10040 /* ContentBlockerService.swift */; };
 		A10008 /* MockScreenTimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008 /* MockScreenTimeManager.swift */; };
 		A10009 /* SharedDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10009 /* SharedDefaults.swift */; };
 		A10010 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10010 /* Constants.swift */; };
@@ -65,6 +66,7 @@
 		B10006 /* ScreenTimeSettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeSettingsManager.swift; sourceTree = "<group>"; };
 		B10007 /* RemoteSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncService.swift; sourceTree = "<group>"; };
 		B10008 /* MockScreenTimeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScreenTimeManager.swift; sourceTree = "<group>"; };
+		B10040 /* ContentBlockerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlockerService.swift; sourceTree = "<group>"; };
 		B10009 /* SharedDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedDefaults.swift; sourceTree = "<group>"; };
 		B10010 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		B10011 /* AuthorizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationView.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				B10007 /* RemoteSyncService.swift */,
 				B10008 /* MockScreenTimeManager.swift */,
 				B10022 /* FirebaseAuthService.swift */,
+				B10040 /* ContentBlockerService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -420,6 +423,7 @@
 				A10005 /* AuthorizationManager.swift in Sources */,
 				A10006 /* ScreenTimeSettingsManager.swift in Sources */,
 				A10007 /* RemoteSyncService.swift in Sources */,
+				A10040 /* ContentBlockerService.swift in Sources */,
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,
