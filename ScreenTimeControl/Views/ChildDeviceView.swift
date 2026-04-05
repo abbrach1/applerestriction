@@ -29,7 +29,8 @@ struct ChildDeviceView: View {
     @State private var websiteRequestReason = ""
     @State private var showBypassEntry = false
     @State private var bypassCode = ""
-    @State private var bypassResult: Bool? = nil   // nil=idle, true=ok, false=wrong
+    @State private var showBypassResultAlert = false
+    @State private var bypassSuccess = false
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -93,17 +94,6 @@ struct ChildDeviceView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                }
-                .alert("Your Name", isPresented: $isEditingName) {
-                    TextField("Name (e.g. David)", text: $nameInput)
-                        .autocorrectionDisabled()
-                    Button("Save") {
-                        let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
-                        Task { await syncService.setDisplayName(trimmed) }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This name is shown to your admin.")
                 }
 
                 // Active restrictions
@@ -299,24 +289,6 @@ struct ChildDeviceView: View {
                             }
                         }
                     } header: { Text("Website Requests") }
-                    .alert("Request Website Access", isPresented: $showWebsiteRequest) {
-                        TextField("Domain (e.g. youtube.com)", text: $websiteRequestDomain)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
-                        TextField("Reason (optional)", text: $websiteRequestReason)
-                            .autocorrectionDisabled()
-                        Button("Send Request") {
-                            let domain = websiteRequestDomain.trimmingCharacters(in: .whitespaces)
-                            let reason = websiteRequestReason.trimmingCharacters(in: .whitespaces)
-                            guard !domain.isEmpty else { return }
-                            Task { await syncService.sendWebsiteRequest(domain: domain, reason: reason) }
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Your admin will be notified and can approve or deny.")
-                    }
-                }
 
                 // Unlock request
                 Section {
@@ -370,45 +342,7 @@ struct ChildDeviceView: View {
                             }
                         }
                     }
-                    .alert("Emergency Code", isPresented: $showBypassEntry) {
-                        TextField("6-digit code", text: $bypassCode)
-                            .keyboardType(.numberPad)
-                            .autocorrectionDisabled()
-                        Button("Unlock") {
-                            Task {
-                                let ok = await syncService.redeemBypassCode(bypassCode.trimmingCharacters(in: .whitespaces))
-                                bypassResult = ok
-                            }
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Enter the emergency code your admin gave you.")
-                    }
-                    .alert(bypassResult == true ? "Unlocked!" : "Invalid Code",
-                           isPresented: Binding(
-                               get: { bypassResult != nil },
-                               set: { if !$0 { bypassResult = nil } }
-                           )) {
-                        Button("OK") { bypassResult = nil }
-                    } message: {
-                        if bypassResult == true {
-                            Text("Device is now unlocked for the permitted duration.")
-                        } else {
-                            Text("That code is invalid or already used. Ask your admin for a new one.")
-                        }
-                    }
                 } header: { Text("Unlock Request") }
-                .alert("Request Unlock", isPresented: $showUnlockRequest) {
-                    TextField("Reason (optional)", text: $unlockReason)
-                        .autocorrectionDisabled()
-                    Button("Send Request") {
-                        let r = unlockReason.trimmingCharacters(in: .whitespaces)
-                        Task { await syncService.sendUnlockRequest(reason: r) }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Your admin will receive a notification and can approve or deny.")
-                }
 
                 Section {
                     Button("Sign Out", role: .destructive) { auth.signOut() }
@@ -439,6 +373,56 @@ struct ChildDeviceView: View {
             }
             .navigationTitle("B-SAFE")
             .navigationBarTitleDisplayMode(.large)
+            // All alerts at NavigationStack level — avoids type-checker issues with Section-level alerts
+            .alert("Your Name", isPresented: $isEditingName) {
+                TextField("Name (e.g. David)", text: $nameInput).autocorrectionDisabled()
+                Button("Save") {
+                    let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
+                    Task { await syncService.setDisplayName(trimmed) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This name is shown to your admin.") }
+            .alert("Request Website Access", isPresented: $showWebsiteRequest) {
+                TextField("Domain (e.g. youtube.com)", text: $websiteRequestDomain)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never).keyboardType(.URL)
+                TextField("Reason (optional)", text: $websiteRequestReason).autocorrectionDisabled()
+                Button("Send Request") {
+                    let domain = websiteRequestDomain.trimmingCharacters(in: .whitespaces)
+                    let reason = websiteRequestReason.trimmingCharacters(in: .whitespaces)
+                    guard !domain.isEmpty else { return }
+                    Task { await syncService.sendWebsiteRequest(domain: domain, reason: reason) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Your admin will be notified and can approve or deny.") }
+            .alert("Request Unlock", isPresented: $showUnlockRequest) {
+                TextField("Reason (optional)", text: $unlockReason).autocorrectionDisabled()
+                Button("Send Request") {
+                    let r = unlockReason.trimmingCharacters(in: .whitespaces)
+                    Task { await syncService.sendUnlockRequest(reason: r) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Your admin will receive a notification and can approve or deny.") }
+            .alert("Emergency Code", isPresented: $showBypassEntry) {
+                TextField("6-digit code", text: $bypassCode)
+                    .keyboardType(.numberPad).autocorrectionDisabled()
+                Button("Unlock") {
+                    Task {
+                        let ok = await syncService.redeemBypassCode(
+                            bypassCode.trimmingCharacters(in: .whitespaces))
+                        bypassSuccess = ok
+                        showBypassResultAlert = true
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Enter the emergency code your admin gave you.") }
+            .alert(bypassSuccess ? "Unlocked!" : "Invalid Code",
+                   isPresented: $showBypassResultAlert) {
+                Button("OK") {}
+            } message: {
+                Text(bypassSuccess
+                     ? "Device is now unlocked for the permitted duration."
+                     : "That code is invalid or already used. Ask your admin for a new one.")
+            }
             .task {
                 await checkContentBlockerState()
                 updateInstallationBlock()
