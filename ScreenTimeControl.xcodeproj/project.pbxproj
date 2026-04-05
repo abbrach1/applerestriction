@@ -71,9 +71,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A50001 /* DeviceActivityMonitor.appex in Embed Extensions */,
-				A50002 /* ShieldConfiguration.appex in Embed Extensions */,
-				A50003 /* ShieldAction.appex in Embed Extensions */,
 			);
 			name = "Embed Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -316,9 +313,6 @@
 			);
 			buildRules = ();
 			dependencies = (
-				TD20001 /* DeviceActivityMonitor dependency */,
-				TD30001 /* ShieldConfiguration dependency */,
-				TD40001 /* ShieldAction dependency */,
 			);
 			name = ScreenTimeControl;
 			productName = ScreenTimeControl;
