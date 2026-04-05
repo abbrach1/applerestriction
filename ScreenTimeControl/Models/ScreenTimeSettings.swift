@@ -27,6 +27,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var contentBlockerEnabled: Bool = false
     var forceDNS: Bool = false
     var nextDNSProfileID: String = ""       // NextDNS profile ID, e.g. "abc123"
+    var nextDNSApiKey: String = ""          // NextDNS API key (admin only)
     var dnsAlertOnRemoval: Bool = true      // notify admin if child removes DNS profile
     var dnsAutoReapply: Bool = true         // automatically re-install DNS profile if removed
 }
@@ -53,6 +54,7 @@ extension ScreenTimeConfiguration {
         contentBlockerEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .contentBlockerEnabled)  ?? false
         forceDNS               = try c.decodeIfPresent(Bool.self,   forKey: .forceDNS)               ?? false
         nextDNSProfileID       = try c.decodeIfPresent(String.self, forKey: .nextDNSProfileID)       ?? ""
+        nextDNSApiKey          = try c.decodeIfPresent(String.self, forKey: .nextDNSApiKey)          ?? ""
         dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? true
         dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? true
     }

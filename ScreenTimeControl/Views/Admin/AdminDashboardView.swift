@@ -674,6 +674,16 @@ struct WebsiteTab: View {
                             .font(.subheadline)
                     }
 
+                    HStack {
+                        Image(systemName: "key.fill")
+                            .foregroundStyle(.purple)
+                            .frame(width: 28)
+                        SecureField("NextDNS API Key", text: $vm.config.nextDNSApiKey)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .font(.subheadline)
+                    }
+
                     Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
@@ -721,7 +731,24 @@ struct WebsiteTab: View {
                     Task {
                         let token = await auth.freshToken() ?? ""
                         await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
+                        // Sync to NextDNS if configured
+                        if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !vm.config.nextDNSApiKey.isEmpty {
+                            let result = await NextDNSService.shared.sync(
+                                profileID: vm.config.nextDNSProfileID,
+                                apiKey: vm.config.nextDNSApiKey,
+                                allowedDomains: vm.config.allowedWebsites,
+                                blockedDomains: vm.config.blockedWebsites,
+                                whitelistMode: vm.config.websiteFilterMode == .whitelist
+                            )
+                            if !result.success, let err = result.error {
+                                vm.lastError = "NextDNS sync failed: \(err)"
+                            }
+                        }
                     }
+                }
+
+                if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !vm.config.nextDNSApiKey.isEmpty {
+                    NextDNSSyncStatusRow(vm: vm)
                 }
             }
         }
@@ -1408,6 +1435,42 @@ struct CommandsTab: View {
 }
 
 // MARK: - Shared Components
+
+// MARK: - NextDNS Sync Status Row
+
+struct NextDNSSyncStatusRow: View {
+    @ObservedObject var vm: AdminUserViewModel
+    @State private var profileName: String? = nil
+    @State private var isChecking = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.shield.fill")
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NextDNS connected")
+                    .font(.caption).fontWeight(.semibold)
+                if let name = profileName {
+                    Text("Profile: \(name)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else if isChecking {
+                    Text("Verifying...")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if isChecking { ProgressView().scaleEffect(0.7) }
+        }
+        .task {
+            isChecking = true
+            profileName = await NextDNSService.shared.fetchProfileName(
+                profileID: vm.config.nextDNSProfileID,
+                apiKey: vm.config.nextDNSApiKey
+            )
+            isChecking = false
+        }
+    }
+}
 
 struct ApplyButton: View {
     let label: String
