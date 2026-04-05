@@ -8,9 +8,8 @@ struct ChildDeviceView: View {
     @State private var isRefreshing = false
     @State private var syncError: String?
 
-    var config: ScreenTimeConfiguration { settingsManager.configuration }
-
     var body: some View {
+        let config = settingsManager.configuration
         NavigationStack {
             List {
                 // Device identity
@@ -39,47 +38,34 @@ struct ChildDeviceView: View {
                     .padding(.vertical, 4)
                 }
 
-                // Active restrictions — shows exactly what the device has received
+                // Active restrictions
                 Section("Active Restrictions") {
-                    StatusRow(
-                        icon: "lock.fill",
-                        label: "Device Lock",
-                        value: config.isLocked ? "LOCKED" : "Off",
-                        active: config.isLocked,
-                        color: .red
-                    )
-                    StatusRow(
-                        icon: "globe",
-                        label: "Website Filter",
-                        value: websiteFilterStatus,
-                        active: isWebsiteFilterActive,
-                        color: .blue
-                    )
-                    StatusRow(
-                        icon: "moon.fill",
-                        label: "Downtime",
-                        value: downtimeStatus,
-                        active: config.downtimeEnabled,
-                        color: .purple
-                    )
+                    StatusRow(icon: "lock.fill", label: "Device Lock",
+                              value: config.isLocked ? "LOCKED" : "Off",
+                              active: config.isLocked, color: .red)
+                    StatusRow(icon: "globe", label: "Website Filter",
+                              value: websiteFilterStatus(config),
+                              active: isWebsiteFilterActive(config), color: .blue)
+                    StatusRow(icon: "moon.fill", label: "Downtime",
+                              value: downtimeStatus(config),
+                              active: config.downtimeEnabled, color: .purple)
                 }
 
-                // Website details if active
-                if isWebsiteFilterActive {
+                // Website details
+                if isWebsiteFilterActive(config) {
                     Section("Website Details") {
-                        LabeledContent("Mode", value: config.websiteFilterMode == .whitelist ? "Whitelist (allow only listed)" : "Blacklist (block listed)")
-                        if config.websiteFilterMode == .blacklist && !config.blockedWebsites.isEmpty {
-                            ForEach(config.blockedWebsites, id: \.self) { site in
-                                Label(site, systemImage: "xmark.circle.fill")
-                                    .foregroundStyle(.red)
-                                    .font(.caption)
-                            }
-                        } else if config.websiteFilterMode == .whitelist && !config.allowedWebsites.isEmpty {
-                            ForEach(config.allowedWebsites, id: \.self) { site in
-                                Label(site, systemImage: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.caption)
-                            }
+                        LabeledContent("Mode", value: config.websiteFilterMode == .whitelist
+                                       ? "Whitelist — all sites blocked"
+                                       : "Blacklist — listed sites blocked")
+                        let sites = config.websiteFilterMode == .whitelist
+                            ? config.allowedWebsites : config.blockedWebsites
+                        let icon = config.websiteFilterMode == .whitelist
+                            ? "checkmark.circle.fill" : "xmark.circle.fill"
+                        let color: Color = config.websiteFilterMode == .whitelist ? .green : .red
+                        ForEach(sites, id: \.self) { site in
+                            Label(site, systemImage: icon)
+                                .foregroundStyle(color)
+                                .font(.caption)
                         }
                     }
                 }
@@ -87,33 +73,24 @@ struct ChildDeviceView: View {
                 // Sync
                 Section {
                     if let last = syncService.lastSyncDate {
-                        LabeledContent("Last Sync", value: last.formatted(.relative(presentation: .named)))
+                        LabeledContent("Last Sync",
+                                       value: last.formatted(.relative(presentation: .named)))
                             .font(.caption)
                     }
-
                     if let err = syncError {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        Text(err).font(.caption).foregroundStyle(.red)
                     }
-
                     Button {
                         Task {
                             isRefreshing = true
                             syncError = nil
                             await syncService.manualSync()
                             isRefreshing = false
-                            if syncService.lastSyncDate == nil {
-                                syncError = "Sync failed — check internet connection"
-                            }
                         }
                     } label: {
                         HStack {
-                            if isRefreshing {
-                                ProgressView().tint(.white)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                            }
+                            if isRefreshing { ProgressView().tint(.white) }
+                            else { Image(systemName: "arrow.clockwise") }
                             Text(isRefreshing ? "Syncing..." : "Sync Settings Now")
                                 .fontWeight(.semibold)
                         }
@@ -126,16 +103,11 @@ struct ChildDeviceView: View {
                     .disabled(isRefreshing)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-                } header: {
-                    Text("Sync")
-                } footer: {
-                    Text("Settings update automatically every 10 seconds.")
-                }
+                } header: { Text("Sync") }
+                footer: { Text("Settings update automatically every 10 seconds.") }
 
                 Section {
-                    Button("Sign Out", role: .destructive) {
-                        auth.signOut()
-                    }
+                    Button("Sign Out", role: .destructive) { auth.signOut() }
                 }
             }
             .navigationTitle("B-SAFE")
@@ -143,23 +115,24 @@ struct ChildDeviceView: View {
         }
     }
 
-    var isWebsiteFilterActive: Bool {
-        if config.websiteFilterMode == .whitelist { return true }
-        return !config.blockedWebsites.isEmpty
+    // MARK: - Helpers (take config as param — config is a body-local)
+
+    private func isWebsiteFilterActive(_ config: ScreenTimeConfiguration) -> Bool {
+        config.websiteFilterMode == .whitelist || !config.blockedWebsites.isEmpty
     }
 
-    var websiteFilterStatus: String {
-        if !isWebsiteFilterActive { return "Off" }
+    private func websiteFilterStatus(_ config: ScreenTimeConfiguration) -> String {
+        guard isWebsiteFilterActive(config) else { return "Off" }
         if config.websiteFilterMode == .whitelist {
             return "Whitelist (\(config.allowedWebsites.count) allowed)"
         }
         return "Blocking \(config.blockedWebsites.count) site(s)"
     }
 
-    var downtimeStatus: String {
+    private func downtimeStatus(_ config: ScreenTimeConfiguration) -> String {
         guard config.downtimeEnabled else { return "Off" }
         let s = config.downtimeSchedule
-        let fmt = { (h: Int, m: Int) -> String in
+        func fmt(_ h: Int, _ m: Int) -> String {
             let suffix = h >= 12 ? "PM" : "AM"
             let hr = h == 0 ? 12 : (h > 12 ? h - 12 : h)
             return String(format: "%d:%02d %@", hr, m, suffix)

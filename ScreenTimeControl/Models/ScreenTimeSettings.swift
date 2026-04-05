@@ -13,44 +13,38 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var deviceName: String = ""
     var lastUpdated: Date = Date()
 
-    // App Restrictions
     var blockedApps: Set<String> = []
     var blockedCategories: Set<String> = []
-
-    // Website Blocking
     var blockedWebsites: [String] = []
     var allowedWebsites: [String] = []
     var websiteFilterMode: WebFilterMode = .blacklist
-
-    // Time Limits
     var appTimeLimits: [AppTimeLimit] = []
-
-    // Downtime
     var downtimeEnabled: Bool = false
     var downtimeSchedule: DowntimeSchedule = DowntimeSchedule()
-
-    // Lock state
     var isLocked: Bool = false
+}
 
-    // MARK: - Custom decode: Firebase removes empty arrays/objects, so
-    // missing keys must fall back to defaults instead of throwing.
+// Custom decode in extension — preserves synthesized init() and memberwise init
+extension ScreenTimeConfiguration {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id               = try c.decodeIfPresent(String.self, forKey: .id)               ?? UUID().uuidString
-        deviceId         = try c.decodeIfPresent(String.self, forKey: .deviceId)         ?? ""
-        deviceName       = try c.decodeIfPresent(String.self, forKey: .deviceName)       ?? ""
-        lastUpdated      = try c.decodeIfPresent(Date.self,   forKey: .lastUpdated)      ?? Date()
-        blockedApps      = try c.decodeIfPresent(Set<String>.self, forKey: .blockedApps)      ?? []
-        blockedCategories = try c.decodeIfPresent(Set<String>.self, forKey: .blockedCategories) ?? []
-        blockedWebsites  = try c.decodeIfPresent([String].self, forKey: .blockedWebsites) ?? []
-        allowedWebsites  = try c.decodeIfPresent([String].self, forKey: .allowedWebsites) ?? []
+        id                = try c.decodeIfPresent(String.self,        forKey: .id)                ?? UUID().uuidString
+        deviceId          = try c.decodeIfPresent(String.self,        forKey: .deviceId)          ?? ""
+        deviceName        = try c.decodeIfPresent(String.self,        forKey: .deviceName)        ?? ""
+        lastUpdated       = try c.decodeIfPresent(Date.self,          forKey: .lastUpdated)       ?? Date()
+        blockedApps       = try c.decodeIfPresent(Set<String>.self,   forKey: .blockedApps)       ?? []
+        blockedCategories = try c.decodeIfPresent(Set<String>.self,   forKey: .blockedCategories) ?? []
+        blockedWebsites   = try c.decodeIfPresent([String].self,      forKey: .blockedWebsites)   ?? []
+        allowedWebsites   = try c.decodeIfPresent([String].self,      forKey: .allowedWebsites)   ?? []
         websiteFilterMode = try c.decodeIfPresent(WebFilterMode.self, forKey: .websiteFilterMode) ?? .blacklist
-        appTimeLimits    = try c.decodeIfPresent([AppTimeLimit].self, forKey: .appTimeLimits) ?? []
-        downtimeEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .downtimeEnabled)  ?? false
-        downtimeSchedule = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
-        isLocked         = try c.decodeIfPresent(Bool.self,   forKey: .isLocked)         ?? false
+        appTimeLimits     = try c.decodeIfPresent([AppTimeLimit].self, forKey: .appTimeLimits)    ?? []
+        downtimeEnabled   = try c.decodeIfPresent(Bool.self,          forKey: .downtimeEnabled)   ?? false
+        downtimeSchedule  = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
+        isLocked          = try c.decodeIfPresent(Bool.self,          forKey: .isLocked)          ?? false
     }
 }
+
+// MARK: - Website Filter Mode
 
 enum WebFilterMode: String, Codable {
     case blacklist
@@ -82,8 +76,9 @@ struct DowntimeSchedule: Codable, Hashable {
     var endTime: DateComponents {
         var c = DateComponents(); c.hour = endHour; c.minute = endMinute; return c
     }
+}
 
-    // Firebase removes empty/full arrays — use decodeIfPresent with default
+extension DowntimeSchedule {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         startHour   = try c.decodeIfPresent(Int.self,      forKey: .startHour)   ?? 22
@@ -103,19 +98,6 @@ struct RemoteCommand: Codable, Identifiable {
     var payload: [String: String] = [:]
     var executed: Bool = false
 
-    init(type: CommandType) {
-        self.type = type
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id        = try c.decodeIfPresent(String.self,      forKey: .id)        ?? UUID().uuidString
-        timestamp = try c.decodeIfPresent(Date.self,        forKey: .timestamp) ?? Date()
-        type      = try c.decode(CommandType.self,          forKey: .type)
-        payload   = try c.decodeIfPresent([String: String].self, forKey: .payload) ?? [:]
-        executed  = try c.decodeIfPresent(Bool.self,        forKey: .executed)  ?? false
-    }
-
     enum CommandType: String, Codable {
         case updateBlockedApps
         case updateDowntime
@@ -124,5 +106,16 @@ struct RemoteCommand: Codable, Identifiable {
         case lockDevice
         case unlockAll
         case refreshSettings
+    }
+}
+
+extension RemoteCommand {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decodeIfPresent(String.self,           forKey: .id)        ?? UUID().uuidString
+        timestamp = try c.decodeIfPresent(Date.self,             forKey: .timestamp) ?? Date()
+        type      = try c.decode(CommandType.self,               forKey: .type)
+        payload   = try c.decodeIfPresent([String: String].self, forKey: .payload)   ?? [:]
+        executed  = try c.decodeIfPresent(Bool.self,             forKey: .executed)  ?? false
     }
 }
