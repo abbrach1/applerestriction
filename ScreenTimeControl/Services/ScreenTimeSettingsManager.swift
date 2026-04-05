@@ -173,14 +173,27 @@ class ScreenTimeSettingsManager: ObservableObject {
             }
         } else {
             // Whitelist mode: block all content EXCEPT sites selected via child-device picker.
-            // Tokens are stored locally since they're device-specific (can't be generated remotely).
+            // Clear any stale per-domain blocks first.
+            store.shield.webDomains = nil
+
             if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
                let data = Data(base64Encoded: base64),
-               let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data),
-               !selection.webDomainTokens.isEmpty {
-                store.shield.webDomainCategories = WebPolicy.all(except: selection.webDomainTokens)
+               let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
+                let webTokens = selection.webDomainTokens
+                let catTokens = selection.categoryTokens
+                if !webTokens.isEmpty {
+                    // Specific websites selected — block everything except those domains
+                    store.shield.webDomainCategories = WebPolicy.all(except: webTokens)
+                } else if !catTokens.isEmpty {
+                    // Only category tokens (e.g. user picked "Shopping" not "amazon.com") —
+                    // can't whitelist by category, so allow all to avoid blocking the wrong things
+                    store.shield.webDomainCategories = nil
+                } else {
+                    // Empty selection — block everything
+                    store.shield.webDomainCategories = WebPolicy.all()
+                }
             } else {
-                // No sites configured yet — block everything until setup is run on device
+                // No selection saved yet — block everything until setup is run on device
                 store.shield.webDomainCategories = WebPolicy.all()
             }
         }

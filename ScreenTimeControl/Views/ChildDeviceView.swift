@@ -734,6 +734,7 @@ struct PendingWebsiteRow: View {
     @State private var isAdding = false
     @State private var added = false
     @State private var needsWhitelistMode = false
+    @State private var addResult = ""
     #if !targetEnvironment(simulator)
     @State private var pickerSelection = FamilyActivitySelection()
     #endif
@@ -756,10 +757,10 @@ struct PendingWebsiteRow: View {
                 }
             }
 
-            if needsWhitelistMode {
-                Label("Saved! Ask admin to enable \"Allow Only Listed Sites\" mode so this takes effect.", systemImage: "exclamationmark.triangle.fill")
+            if !addResult.isEmpty {
+                Text(addResult)
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(needsWhitelistMode ? .orange : .green)
             }
 
             HStack(spacing: 8) {
@@ -853,9 +854,21 @@ struct PendingWebsiteRow: View {
             UserDefaults.standard.set(data.base64EncodedString(), forKey: "screentime.websiteSelection")
         }
 
-        // Apply immediately — only has effect if admin has enabled whitelist mode
+        // Apply immediately
         settingsManager.applyWebsiteRestrictions()
         needsWhitelistMode = settingsManager.configuration.websiteFilterMode != .whitelist
+
+        let webCount = merged.webDomainTokens.count
+        let catCount = merged.categoryTokens.count
+        if needsWhitelistMode {
+            addResult = "Saved (\(webCount) site\(webCount == 1 ? "" : "s"), \(catCount) categor\(catCount == 1 ? "y" : "ies")). Ask admin to enable 'Allow Only Listed Sites'."
+        } else if webCount == 0 && catCount > 0 {
+            addResult = "⚠️ Only categories were saved (\(catCount)). In the picker, scroll to Websites and select the specific site name, not a category."
+        } else if webCount == 0 {
+            addResult = "⚠️ Nothing was selected. Open the picker and select a website by name."
+        } else {
+            addResult = "✓ \(webCount) website\(webCount == 1 ? "" : "s") added to whitelist."
+        }
 
         // Update Firebase setup info
         if let user = auth.currentUser {
