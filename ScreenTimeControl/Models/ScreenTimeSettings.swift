@@ -5,7 +5,6 @@ import FamilyControls
 import ManagedSettings
 #endif
 
-/// Represents a complete set of Screen Time restrictions that can be synced remotely
 struct ScreenTimeConfiguration: Codable, Identifiable {
     var id: String = UUID().uuidString
     var deviceId: String = ""
@@ -13,8 +12,13 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var lastUpdated: Date = Date()
 
     // App Restrictions
-    var blockedApps: Set<String> = []       // Bundle identifier tokens
-    var blockedCategories: Set<String> = [] // Category tokens
+    var blockedApps: Set<String> = []
+    var blockedCategories: Set<String> = []
+
+    // Website Blocking
+    var blockedWebsites: [String] = []        // Domains to block e.g. "youtube.com"
+    var allowedWebsites: [String] = []        // Whitelist mode: only these allowed
+    var websiteFilterMode: WebFilterMode = .blacklist
 
     // Time Limits
     var appTimeLimits: [AppTimeLimit] = []
@@ -23,42 +27,38 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var downtimeEnabled: Bool = false
     var downtimeSchedule: DowntimeSchedule = DowntimeSchedule()
 
-    // Shield settings
-    var shieldApps: Bool = true
-    var shieldWebDomains: Bool = true
+    // Lock state
+    var isLocked: Bool = false
+}
+
+enum WebFilterMode: String, Codable {
+    case blacklist  // Block specific sites, allow everything else
+    case whitelist  // Allow only specific sites, block everything else
 }
 
 struct AppTimeLimit: Codable, Identifiable, Hashable {
     var id: String = UUID().uuidString
-    var appToken: String   // Encoded app/category token
+    var appToken: String
     var displayName: String
     var timeLimitMinutes: Int
     var isCategory: Bool = false
 }
 
 struct DowntimeSchedule: Codable, Hashable {
-    var startHour: Int = 22    // 10 PM
+    var startHour: Int = 22
     var startMinute: Int = 0
-    var endHour: Int = 7       // 7 AM
+    var endHour: Int = 7
     var endMinute: Int = 0
-    var activeDays: Set<Int> = Set(1...7) // 1=Sunday, 7=Saturday
+    var activeDays: Set<Int> = Set(1...7)
 
     var startTime: DateComponents {
-        var components = DateComponents()
-        components.hour = startHour
-        components.minute = startMinute
-        return components
+        var c = DateComponents(); c.hour = startHour; c.minute = startMinute; return c
     }
-
     var endTime: DateComponents {
-        var components = DateComponents()
-        components.hour = endHour
-        components.minute = endMinute
-        return components
+        var c = DateComponents(); c.hour = endHour; c.minute = endMinute; return c
     }
 }
 
-/// Remote command that can be sent to a device
 struct RemoteCommand: Codable, Identifiable {
     var id: String = UUID().uuidString
     var timestamp: Date = Date()
@@ -70,6 +70,7 @@ struct RemoteCommand: Codable, Identifiable {
         case updateBlockedApps
         case updateDowntime
         case updateTimeLimits
+        case updateWebsites
         case lockDevice
         case unlockAll
         case refreshSettings
