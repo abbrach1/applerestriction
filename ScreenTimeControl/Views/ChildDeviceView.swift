@@ -24,6 +24,12 @@ struct ChildDeviceView: View {
     @State private var showUnlockRequest = false
     @State private var unlockReason = ""
     @State private var showChecklist = false
+    @State private var showWebsiteRequest = false
+    @State private var websiteRequestDomain = ""
+    @State private var websiteRequestReason = ""
+    @State private var showBypassEntry = false
+    @State private var bypassCode = ""
+    @State private var bypassResult: Bool? = nil   // nil=idle, true=ok, false=wrong
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -255,6 +261,63 @@ struct ChildDeviceView: View {
                 } header: { Text("App Review") }
                   footer: { Text("If new app installs are blocked, send your app list to request admin approval.") }
 
+                // Website access requests
+                Section {
+                    ForEach(syncService.pendingWebsiteRequests, id: \.key) { item in
+                            HStack(spacing: 10) {
+                                Image(systemName: "globe.badge.exclamationmark")
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.request.domain)
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("Pending admin approval")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Cancel") {
+                                    Task { await syncService.cancelWebsiteRequest(key: item.key) }
+                                }
+                                .font(.caption).foregroundStyle(.red)
+                            }
+                            .padding(.vertical, 2)
+                        }
+
+                        Button {
+                            websiteRequestDomain = ""
+                            websiteRequestReason = ""
+                            showWebsiteRequest = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "globe.badge.exclamationmark")
+                                    .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Request Website Access")
+                                        .foregroundStyle(.primary)
+                                    Text("Ask admin to allow a specific site")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    } header: { Text("Website Requests") }
+                    .alert("Request Website Access", isPresented: $showWebsiteRequest) {
+                        TextField("Domain (e.g. youtube.com)", text: $websiteRequestDomain)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                        TextField("Reason (optional)", text: $websiteRequestReason)
+                            .autocorrectionDisabled()
+                        Button("Send Request") {
+                            let domain = websiteRequestDomain.trimmingCharacters(in: .whitespaces)
+                            let reason = websiteRequestReason.trimmingCharacters(in: .whitespaces)
+                            guard !domain.isEmpty else { return }
+                            Task { await syncService.sendWebsiteRequest(domain: domain, reason: reason) }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Your admin will be notified and can approve or deny.")
+                    }
+                }
+
                 // Unlock request
                 Section {
                     if syncService.pendingUnlockRequest != nil {
@@ -288,6 +351,50 @@ struct ChildDeviceView: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
+                        }
+                    }
+                    // Emergency bypass code entry (hidden-ish — below unlock request)
+                    Button {
+                        bypassCode = ""
+                        bypassResult = nil
+                        showBypassEntry = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "key.fill")
+                                .foregroundStyle(.purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Enter Emergency Code")
+                                    .foregroundStyle(.primary)
+                                Text("Use a one-time code from your admin")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .alert("Emergency Code", isPresented: $showBypassEntry) {
+                        TextField("6-digit code", text: $bypassCode)
+                            .keyboardType(.numberPad)
+                            .autocorrectionDisabled()
+                        Button("Unlock") {
+                            Task {
+                                let ok = await syncService.redeemBypassCode(bypassCode.trimmingCharacters(in: .whitespaces))
+                                bypassResult = ok
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Enter the emergency code your admin gave you.")
+                    }
+                    .alert(bypassResult == true ? "Unlocked!" : "Invalid Code",
+                           isPresented: Binding(
+                               get: { bypassResult != nil },
+                               set: { if !$0 { bypassResult = nil } }
+                           )) {
+                        Button("OK") { bypassResult = nil }
+                    } message: {
+                        if bypassResult == true {
+                            Text("Device is now unlocked for the permitted duration.")
+                        } else {
+                            Text("That code is invalid or already used. Ask your admin for a new one.")
                         }
                     }
                 } header: { Text("Unlock Request") }

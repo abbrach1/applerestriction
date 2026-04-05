@@ -190,6 +190,46 @@ extension AdminNotification {
     }
 }
 
+// MARK: - Website Request (child → admin, stored at /users/uid/websiteRequests/{autoId})
+
+struct WebsiteRequest: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var domain: String = ""
+    var reason: String = ""
+    var timestamp: Date = Date()
+    var deviceName: String = ""
+}
+
+extension WebsiteRequest {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try c.decodeIfPresent(String.self, forKey: .id)         ?? UUID().uuidString
+        domain     = try c.decodeIfPresent(String.self, forKey: .domain)     ?? ""
+        reason     = try c.decodeIfPresent(String.self, forKey: .reason)     ?? ""
+        timestamp  = try c.decodeIfPresent(Date.self,   forKey: .timestamp)  ?? Date()
+        deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
+    }
+}
+
+// MARK: - Emergency Bypass Code (admin → child, stored at /users/uid/emergencyBypass)
+
+struct EmergencyBypassCode: Codable {
+    var code: String = ""
+    var durationMinutes: Int = 30
+    var createdAt: Date = Date()
+    var used: Bool = false
+}
+
+extension EmergencyBypassCode {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code            = try c.decodeIfPresent(String.self, forKey: .code)            ?? ""
+        durationMinutes = try c.decodeIfPresent(Int.self,    forKey: .durationMinutes) ?? 30
+        createdAt       = try c.decodeIfPresent(Date.self,   forKey: .createdAt)       ?? Date()
+        used            = try c.decodeIfPresent(Bool.self,   forKey: .used)            ?? false
+    }
+}
+
 // MARK: - Unlock Request (child → admin, stored at /users/uid/unlockRequests/{autoId})
 
 struct UnlockRequest: Codable, Identifiable {

@@ -23,6 +23,7 @@ class RemoteSyncService: ObservableObject {
     @Published var pendingApps: [String: RecommendedApp] = [:]
     @Published var displayName: String = ""
     @Published var pendingUnlockRequest: (key: String, request: UnlockRequest)? = nil
+    @Published var pendingWebsiteRequests: [(key: String, request: WebsiteRequest)] = []
 
     // Keep for legacy compatibility
     @Published var isPaired: Bool = false
@@ -44,6 +45,7 @@ class RemoteSyncService: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.recheckDNSOnForeground()
+                self?.checkScheduledRelock()
             }
         }
     }
@@ -194,6 +196,26 @@ class RemoteSyncService: ObservableObject {
                 await MainActor.run { self.pendingUnlockRequest = nil }
             }
         }
+
+        // Website requests — show child their pending requests
+        observe(userRef.child("websiteRequests")) { [weak self] snapshot in
+            guard let self else { return }
+            guard let dict = snapshot.value as? [String: Any] else {
+                await MainActor.run { self.pendingWebsiteRequests = [] }
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            var result: [(key: String, request: WebsiteRequest)] = []
+            for (key, val) in dict {
+                if let data = try? JSONSerialization.data(withJSONObject: val),
+                   let req = try? decoder.decode(WebsiteRequest.self, from: data) {
+                    result.append((key, req))
+                }
+            }
+            let sorted = result.sorted { $0.request.timestamp > $1.request.timestamp }
+            await MainActor.run { self.pendingWebsiteRequests = sorted }
+        }
     }
 
     func stopListening() {
@@ -277,6 +299,11 @@ class RemoteSyncService: ObservableObject {
         guard let data = try? encoder.encode(req),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         try? await dbRef.child("users/\(uid)/unlockRequests").childByAutoId().setValue(dict)
+        let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
+        await sendFCMToAdmin(
+            title: "🔓 Unlock Request",
+            body: "\(name)\(reason.isEmpty ? " is requesting an unlock" : ": \(reason)")"
+        )
     }
 
     func cancelUnlockRequest() async {
@@ -284,6 +311,64 @@ class RemoteSyncService: ObservableObject {
               let key = pendingUnlockRequest?.key else { return }
         try? await dbRef.child("users/\(uid)/unlockRequests/\(key)").removeValue()
         pendingUnlockRequest = nil
+    }
+
+    // MARK: - Website Requests
+
+    func sendWebsiteRequest(domain: String, reason: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let clean = domain
+            .lowercased()
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "www.", with: "")
+            .components(separatedBy: "/").first ?? domain
+        var req = WebsiteRequest()
+        req.domain = clean
+        req.reason = reason
+        req.timestamp = Date()
+        req.deviceName = DeviceInfo.current.name
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let data = try? encoder.encode(req),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        try? await dbRef.child("users/\(uid)/websiteRequests").childByAutoId().setValue(dict)
+        let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
+        await sendFCMToAdmin(
+            title: "🌐 Website Request",
+            body: "\(name) wants access to \(clean)\(reason.isEmpty ? "" : " — \(reason)")"
+        )
+    }
+
+    func cancelWebsiteRequest(key: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        try? await dbRef.child("users/\(uid)/websiteRequests/\(key)").removeValue()
+        pendingWebsiteRequests.removeAll { $0.key == key }
+    }
+
+    // MARK: - FCM Push to Admin
+
+    /// Sends a push notification to the admin device via FCM Legacy HTTP API.
+    /// Admin must configure their FCM server key in the admin dashboard settings.
+    /// Requires the admin device to have B-SAFE installed with notifications enabled.
+    private func sendFCMToAdmin(title: String, body: String) async {
+        let tokenSnap = try? await dbRef.child("adminConfig/fcmToken").getData()
+        let keySnap   = try? await dbRef.child("adminConfig/fcmServerKey").getData()
+        guard let token = tokenSnap?.value as? String, !token.isEmpty,
+              let serverKey = keySnap?.value as? String, !serverKey.isEmpty else { return }
+        guard let url = URL(string: "https://fcm.googleapis.com/fcm/send") else { return }
+        let payload: [String: Any] = [
+            "to": token,
+            "notification": ["title": title, "body": body, "sound": "default"],
+            "priority": "high"
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("key=\(serverKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     // MARK: - Manual Sync (refresh button)
@@ -335,14 +420,79 @@ class RemoteSyncService: ObservableObject {
         switch command.type {
         case .lockDevice:
             await MainActor.run { mgr.lockAllApps() }
+            // Clear any scheduled re-lock — device is already locked
+            UserDefaults.standard.removeObject(forKey: "bsafe.relockAt")
         case .unlockAll:
             await MainActor.run { mgr.unlockAll() }
+            // Schedule timed re-lock if admin sent a duration in the payload
+            if let durStr = command.payload["durationMinutes"],
+               let minutes = Int(durStr), minutes > 0 {
+                let relockAt = Date().addingTimeInterval(TimeInterval(minutes * 60))
+                UserDefaults.standard.set(relockAt.timeIntervalSince1970, forKey: "bsafe.relockAt")
+                scheduleRelockTimer(after: TimeInterval(minutes * 60))
+            } else {
+                UserDefaults.standard.removeObject(forKey: "bsafe.relockAt")
+            }
         case .updateBlockedApps, .updateTimeLimits, .updateDowntime,
              .updateWebsites, .refreshSettings:
-            // Settings listener will already apply the latest config automatically.
-            // Force an immediate fetch for instant response to the command.
             await manualSync()
         }
+    }
+
+    func checkScheduledRelock() {
+        guard let ts = UserDefaults.standard.value(forKey: "bsafe.relockAt") as? TimeInterval else { return }
+        let relockAt = Date(timeIntervalSince1970: ts)
+        if Date() >= relockAt {
+            ActiveScreenTimeSettingsManager.shared.lockAllApps()
+            UserDefaults.standard.removeObject(forKey: "bsafe.relockAt")
+        } else {
+            scheduleRelockTimer(after: relockAt.timeIntervalSinceNow)
+        }
+    }
+
+    private func scheduleRelockTimer(after interval: TimeInterval) {
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0, interval)) * 1_000_000_000)
+            if let ts = UserDefaults.standard.value(forKey: "bsafe.relockAt") as? TimeInterval,
+               Date() >= Date(timeIntervalSince1970: ts) {
+                await MainActor.run { ActiveScreenTimeSettingsManager.shared.lockAllApps() }
+                UserDefaults.standard.removeObject(forKey: "bsafe.relockAt")
+            }
+        }
+    }
+
+    // MARK: - Emergency Bypass Code
+
+    func redeemBypassCode(_ code: String) async -> Bool {
+        guard let uid = Auth.auth().currentUser?.uid else { return false }
+        let snapshot = try? await dbRef.child("users/\(uid)/emergencyBypass").getData()
+        guard let dict = snapshot?.value as? [String: Any] else { return false }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        for (_, val) in dict {
+            guard let data = try? JSONSerialization.data(withJSONObject: val),
+                  var bypass = try? decoder.decode(EmergencyBypassCode.self, from: data),
+                  bypass.code == code, !bypass.used else { continue }
+            // Valid code — mark used, unlock, schedule re-lock
+            bypass.used = true
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .millisecondsSince1970
+            if let updData = try? encoder.encode(bypass),
+               let updDict = try? JSONSerialization.jsonObject(with: updData) as? [String: Any] {
+                // Delete the bypass code so it can't be reused
+                try? await dbRef.child("users/\(uid)/emergencyBypass").setValue(nil)
+                _ = updDict
+            }
+            let minutes = bypass.durationMinutes
+            await MainActor.run { ActiveScreenTimeSettingsManager.shared.unlockAll() }
+            if minutes > 0 {
+                let relockAt = Date().addingTimeInterval(TimeInterval(minutes * 60))
+                UserDefaults.standard.set(relockAt.timeIntervalSince1970, forKey: "bsafe.relockAt")
+                scheduleRelockTimer(after: TimeInterval(minutes * 60))
+            }
+            return true
+        }
+        return false
     }
 
     // MARK: - Private: Notification Delivery

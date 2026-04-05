@@ -59,6 +59,7 @@ class AdminUserViewModel: ObservableObject {
     @Published var websiteSetupInfo: WebsiteSetupInfo?
     @Published var tamperAlerts: [(pushKey: String, alert: TamperAlert)] = []
     @Published var unlockRequests: [(pushKey: String, request: UnlockRequest)] = []
+    @Published var websiteRequests: [(pushKey: String, request: WebsiteRequest)] = []
 
     struct WebsiteSetupInfo {
         let siteCount: Int
@@ -160,6 +161,7 @@ class AdminUserViewModel: ObservableObject {
             group.addTask { await self.loadWebsiteSetup(uid: uid, idToken: idToken) }
             group.addTask { await self.loadTamperAlerts(uid: uid, idToken: idToken) }
             group.addTask { await self.loadUnlockRequests(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadWebsiteRequests(uid: uid, idToken: idToken) }
         }
 
         isLoading = false
@@ -271,6 +273,52 @@ class AdminUserViewModel: ObservableObject {
         _ = try? await URLSession.shared.data(for: req)
     }
 
+    func loadWebsiteRequests(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/websiteRequests.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .millisecondsSince1970
+        var results: [(pushKey: String, request: WebsiteRequest)] = []
+        for (key, val) in dict {
+            if let d = try? JSONSerialization.data(withJSONObject: val),
+               let req = try? dec.decode(WebsiteRequest.self, from: d) {
+                results.append((pushKey: key, request: req))
+            }
+        }
+        websiteRequests = results.sorted { $0.request.timestamp > $1.request.timestamp }
+    }
+
+    func approveWebsiteRequest(pushKey: String, domain: String, uid: String, idToken: String) async {
+        // Add to allowed list if not already there
+        if !config.allowedWebsites.contains(domain) {
+            config.allowedWebsites.append(domain)
+        }
+        // Save updated settings to Firebase
+        await saveAndSendCommand(.refreshSettings, uid: uid, idToken: idToken, section: "website_approved")
+        // Delete the request
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/websiteRequests/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        websiteRequests.removeAll { $0.pushKey == pushKey }
+    }
+
+    func denyWebsiteRequest(pushKey: String, uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/websiteRequests/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        websiteRequests.removeAll { $0.pushKey == pushKey }
+    }
+
+    func setEmergencyBypassCode(_ code: EmergencyBypassCode, uid: String, idToken: String) async {
+        guard let encoded = try? encoder.encode(code),
+              let url = URL(string: "\(dbURL)/users/\(uid)/emergencyBypass.json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = encoded
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
     func markAppListReviewed(uid: String, idToken: String) async {
         guard var report = appListReport else { return }
         report.reviewed = true
@@ -338,8 +386,12 @@ class AdminUserViewModel: ObservableObject {
 struct AdminDashboardView: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @StateObject private var vm = AdminViewModel()
+    @State private var showFCMSettings = false
+    @State private var fcmServerKey = ""
+    @State private var fcmSaved = false
 
     private var onlineCount: Int { vm.users.filter(\.isOnline).count }
+    private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     var body: some View {
         NavigationStack {
@@ -420,15 +472,107 @@ struct AdminDashboardView: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Sign Out", role: .destructive) {
-                        auth.signOut()
+                    Menu {
+                        Button("Sign Out", role: .destructive) { auth.signOut() }
+                        Button {
+                            showFCMSettings = true
+                        } label: {
+                            Label("Notification Settings", systemImage: "bell.badge")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            .sheet(isPresented: $showFCMSettings) {
+                NavigationStack {
+                    Form {
+                        Section {
+                            SecureField("FCM Server Key", text: $fcmServerKey)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        } header: {
+                            Text("Push Notifications to Admin")
+                        } footer: {
+                            Text("Get this from Firebase Console → Project Settings → Cloud Messaging → Server Key. Enables push notifications to your phone when a child sends an unlock or website request.")
+                                .font(.caption)
+                        }
+
+                        Section {
+                            Button {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    guard let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)") else { return }
+                                    var req = URLRequest(url: url)
+                                    req.httpMethod = "PUT"
+                                    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                                    req.httpBody = "\"\(fcmServerKey)\"".data(using: .utf8)
+                                    _ = try? await URLSession.shared.data(for: req)
+                                    fcmSaved = true
+                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    fcmSaved = false
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: fcmSaved ? "checkmark.circle.fill" : "icloud.and.arrow.up")
+                                    Text(fcmSaved ? "Saved!" : "Save Server Key")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(fcmSaved ? Color.green : Color(red: 0, green: 0.4, blue: 0.15))
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .disabled(fcmServerKey.isEmpty)
+                        }
+
+                        Section("About FCM Token") {
+                            Text("Your device's FCM token is automatically registered when you open the admin dashboard. No extra steps needed — just enter the server key above.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .navigationTitle("Notification Settings")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showFCMSettings = false }
+                        }
                     }
                 }
             }
             .task {
                 let token = await auth.freshToken() ?? ""
                 await vm.loadUsers(idToken: token)
+                // Register this device's FCM token so child can push notifications to admin
+                await registerAdminFCMToken(idToken: token)
+                // Pre-fill server key if already saved
+                if let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)"),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let key = try? JSONDecoder().decode(String.self, from: data) {
+                    fcmServerKey = key
+                }
             }
+        }
+    }
+
+    private func registerAdminFCMToken(idToken: String) async {
+        // Attempt to get FCM token via UIApplication APNs token stored by Firebase SDK.
+        // For this to work, ensure the app has Push Notifications capability and
+        // FirebaseMessaging is in the project (File > Add Package > firebase-ios-sdk > FirebaseMessaging).
+        //
+        // If FirebaseMessaging is not yet added, this block is safely skipped at runtime.
+        guard let tokenClass = NSClassFromString("FIRMessaging") as? NSObject.Type,
+              let messaging = tokenClass.value(forKey: "messaging") as? NSObject else { return }
+        if let fcmToken = messaging.value(forKey: "FCMToken") as? String, !fcmToken.isEmpty {
+            guard let url = URL(string: "\(dbURL)/adminConfig/fcmToken.json?auth=\(idToken)") else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "PUT"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = "\"\(fcmToken)\"".data(using: .utf8)
+            _ = try? await URLSession.shared.data(for: req)
         }
     }
 }
@@ -561,6 +705,72 @@ struct WebsiteTab: View {
 
     var body: some View {
         List {
+            // Pending website access requests from child
+            if !vm.websiteRequests.isEmpty {
+                Section {
+                    ForEach(vm.websiteRequests, id: \.pushKey) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "globe.badge.exclamationmark")
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.request.domain)
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text(item.request.deviceName.isEmpty ? "Unknown device" : item.request.deviceName)
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(item.request.timestamp.formatted(.relative(presentation: .named)))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if !item.request.reason.isEmpty {
+                                Text("\"\(item.request.reason)\"")
+                                    .font(.caption).foregroundStyle(.secondary).italic()
+                            }
+                            HStack(spacing: 10) {
+                                Button {
+                                    Task {
+                                        let token = await auth.freshToken() ?? ""
+                                        await vm.approveWebsiteRequest(
+                                            pushKey: item.pushKey,
+                                            domain: item.request.domain,
+                                            uid: user.uid, idToken: token
+                                        )
+                                    }
+                                } label: {
+                                    Text("Approve")
+                                        .font(.caption).fontWeight(.semibold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                        .background(Color.green)
+                                        .foregroundStyle(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                }
+                                Button {
+                                    Task {
+                                        let token = await auth.freshToken() ?? ""
+                                        await vm.denyWebsiteRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                    }
+                                } label: {
+                                    Text("Deny")
+                                        .font(.caption).fontWeight(.semibold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                        .background(Color.red.opacity(0.12))
+                                        .foregroundStyle(.red)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Label("Website Access Requests", systemImage: "globe.badge.exclamationmark")
+                } footer: {
+                    Text("Approve adds the site to their whitelist and saves immediately.")
+                }
+            }
+
             // Child device setup status
             if let info = vm.websiteSetupInfo {
                 Section {
@@ -1280,6 +1490,92 @@ extension CommandsTab {
     }
 }
 
+// MARK: - Emergency Bypass Code Section
+
+struct EmergencyBypassSection: View {
+    @ObservedObject var vm: AdminUserViewModel
+    let user: ManagedUser
+    @EnvironmentObject var auth: FirebaseAuthService
+
+    @State private var generatedCode: String = ""
+    @State private var selectedDuration: Int = 30   // minutes
+    @State private var isSending = false
+    @State private var codeSent = false
+
+    private let durations = [(15, "15 min"), (30, "30 min"), (60, "1 hour"), (120, "2 hours")]
+
+    var body: some View {
+        Section {
+            if codeSent && !generatedCode.isEmpty {
+                VStack(spacing: 8) {
+                    Text("Emergency Code")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(formattedCode)
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+                        .tracking(8)
+                    Text("Valid for \(durationLabel) · One-time use")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
+
+            Picker("Duration", selection: $selectedDuration) {
+                ForEach(durations, id: \.0) { mins, label in
+                    Text(label).tag(mins)
+                }
+            }
+
+            Button {
+                let code = String(format: "%06d", Int.random(in: 0...999999))
+                generatedCode = code
+                let bypass = EmergencyBypassCode(
+                    code: code,
+                    durationMinutes: selectedDuration,
+                    createdAt: Date(),
+                    used: false
+                )
+                Task {
+                    isSending = true
+                    let token = await auth.freshToken() ?? ""
+                    await vm.setEmergencyBypassCode(bypass, uid: user.uid, idToken: token)
+                    codeSent = true
+                    isSending = false
+                }
+            } label: {
+                HStack {
+                    if isSending { ProgressView().tint(.white) }
+                    else { Image(systemName: codeSent ? "arrow.triangle.2.circlepath" : "key.fill") }
+                    Text(codeSent ? "Generate New Code" : "Generate Emergency Code")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.purple)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isSending)
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+        } header: {
+            Label("Emergency Bypass Code", systemImage: "key.fill")
+        } footer: {
+            Text("Give the child this code for emergencies. It unlocks the device for the selected duration and is one-time use only.")
+        }
+    }
+
+    private var formattedCode: String {
+        guard generatedCode.count == 6 else { return generatedCode }
+        return "\(generatedCode.prefix(3)) \(generatedCode.suffix(3))"
+    }
+
+    private var durationLabel: String {
+        durations.first { $0.0 == selectedDuration }?.1 ?? "\(selectedDuration) min"
+    }
+}
+
 // MARK: - AppsTab helpers
 
 extension AppsTab {
@@ -1556,6 +1852,8 @@ struct CommandsTab: View {
                     }
                 }
             }
+
+            EmergencyBypassSection(vm: vm, user: user)
 
             Section {
                 VStack(alignment: .leading, spacing: 6) {
