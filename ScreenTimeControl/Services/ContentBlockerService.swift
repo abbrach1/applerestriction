@@ -1,7 +1,7 @@
 #if !targetEnvironment(simulator)
 import Foundation
 import SafariServices
-import NetworkExtension
+@preconcurrency import NetworkExtension
 
 /// Manages the Safari Content Blocker and DNS-over-HTTPS settings for B-SAFE.
 ///
@@ -58,21 +58,18 @@ class ContentBlockerService {
     /// Falls back to NextDNS default (no filtering) if profileID is empty.
     /// Calling multiple times is safe — NEDNSSettingsManager replaces existing profile.
     func enableForcedDNS(profileID: String) async {
-        let manager = NEDNSSettingsManager.shared()
-        await withCheckedContinuation { continuation in
-            manager.loadFromPreferences { _ in
-                // NextDNS anycast IPs as fallback servers
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let mgr = NEDNSSettingsManager.shared()
+            mgr.loadFromPreferences { _ in
                 let doh = NEDNSOverHTTPSSettings(servers: ["45.90.28.0", "45.90.30.0"])
                 let urlString = profileID.isEmpty
                     ? "https://dns.nextdns.io"
                     : "https://dns.nextdns.io/\(profileID)"
                 doh.serverURL = URL(string: urlString)
-                manager.dnsSettings = doh
-                manager.localizedDescription = "B-SAFE DNS Filter"
-                manager.saveToPreferences { error in
-                    if let error {
-                        print("[B-SAFE] DNS profile save error: \(error)")
-                    }
+                mgr.dnsSettings = doh
+                mgr.localizedDescription = "B-SAFE DNS Filter"
+                mgr.saveToPreferences { error in
+                    if let error { print("[B-SAFE] DNS save error: \(error)") }
                     continuation.resume()
                 }
             }
@@ -81,13 +78,11 @@ class ContentBlockerService {
 
     /// Remove the B-SAFE DNS profile (restores device default DNS).
     func disableForcedDNS() async {
-        let manager = NEDNSSettingsManager.shared()
-        await withCheckedContinuation { continuation in
-            manager.loadFromPreferences { _ in
-                manager.removeFromPreferences { error in
-                    if let error {
-                        print("[B-SAFE] DNS profile remove error: \(error)")
-                    }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let mgr = NEDNSSettingsManager.shared()
+            mgr.loadFromPreferences { _ in
+                mgr.removeFromPreferences { error in
+                    if let error { print("[B-SAFE] DNS remove error: \(error)") }
                     continuation.resume()
                 }
             }

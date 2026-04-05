@@ -443,7 +443,7 @@ struct ChildDeviceView: View {
                 await checkContentBlockerState()
                 updateInstallationBlock()
             }
-            .onChange(of: syncService.pendingApps.count) { _ in
+            .onChange(of: syncService.pendingApps.count) {
                 updateInstallationBlock()
             }
             .sheet(isPresented: $showAdminSetup) {

@@ -75,7 +75,7 @@ class RemoteSyncService: ObservableObject {
             encoder.dateEncodingStrategy = .millisecondsSince1970
             if let d = try? encoder.encode(alert),
                let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-                try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+                _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
         }
     }
@@ -142,7 +142,7 @@ class RemoteSyncService: ObservableObject {
             guard let cmd = try? decoder.decode(RemoteCommand.self, from: data),
                   !cmd.executed else { return }
             await self.executeCommand(cmd)
-            try? await snapshot.ref.removeValue()   // delete after executing — no re-delivery
+            _ = try? await snapshot.ref.removeValue()   // delete after executing — no re-delivery
         }
 
         // Pending websites
@@ -179,7 +179,7 @@ class RemoteSyncService: ObservableObject {
             decoder.dateDecodingStrategy = .millisecondsSince1970
             guard let note = try? decoder.decode(AdminNotification.self, from: data) else { return }
             await self.deliverLocalNotification(note)
-            try? await snapshot.ref.removeValue()   // delete after delivering
+            _ = try? await snapshot.ref.removeValue()   // delete after delivering
         }
 
         // Unlock requests — watch so child sees when admin approves/denies
@@ -275,14 +275,14 @@ class RemoteSyncService: ObservableObject {
             "isOnline": true,
             "lastSeen": ISO8601DateFormatter().string(from: Date())
         ]
-        try? await dbRef.child("users/\(uid)/info").setValue(info)
+        _ = try? await dbRef.child("users/\(uid)/info").setValue(info)
         isPaired = true
     }
 
     func setDisplayName(_ name: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         displayName = name
-        try? await dbRef.child("users/\(uid)/info/displayName").setValue(name)
+        _ = try? await dbRef.child("users/\(uid)/info/displayName").setValue(name)
     }
 
     // MARK: - Unlock Requests
@@ -298,7 +298,7 @@ class RemoteSyncService: ObservableObject {
         encoder.dateEncodingStrategy = .millisecondsSince1970
         guard let data = try? encoder.encode(req),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        try? await dbRef.child("users/\(uid)/unlockRequests").childByAutoId().setValue(dict)
+        _ = try? await dbRef.child("users/\(uid)/unlockRequests").childByAutoId().setValue(dict)
         let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
         await sendFCMToAdmin(
             title: "🔓 Unlock Request",
@@ -309,7 +309,7 @@ class RemoteSyncService: ObservableObject {
     func cancelUnlockRequest() async {
         guard let uid = Auth.auth().currentUser?.uid,
               let key = pendingUnlockRequest?.key else { return }
-        try? await dbRef.child("users/\(uid)/unlockRequests/\(key)").removeValue()
+        _ = try? await dbRef.child("users/\(uid)/unlockRequests/\(key)").removeValue()
         pendingUnlockRequest = nil
     }
 
@@ -332,7 +332,7 @@ class RemoteSyncService: ObservableObject {
         encoder.dateEncodingStrategy = .millisecondsSince1970
         guard let data = try? encoder.encode(req),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        try? await dbRef.child("users/\(uid)/websiteRequests").childByAutoId().setValue(dict)
+        _ = try? await dbRef.child("users/\(uid)/websiteRequests").childByAutoId().setValue(dict)
         let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
         await sendFCMToAdmin(
             title: "🌐 Website Request",
@@ -342,7 +342,7 @@ class RemoteSyncService: ObservableObject {
 
     func cancelWebsiteRequest(key: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        try? await dbRef.child("users/\(uid)/websiteRequests/\(key)").removeValue()
+        _ = try? await dbRef.child("users/\(uid)/websiteRequests/\(key)").removeValue()
         pendingWebsiteRequests.removeAll { $0.key == key }
     }
 
@@ -396,13 +396,13 @@ class RemoteSyncService: ObservableObject {
 
     func removePendingWebsite(pushKey: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        try? await dbRef.child("users/\(uid)/pendingWebsites/\(pushKey)").removeValue()
+        _ = try? await dbRef.child("users/\(uid)/pendingWebsites/\(pushKey)").removeValue()
         pendingWebsites.removeValue(forKey: pushKey)
     }
 
     func removePendingApp(pushKey: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        try? await dbRef.child("users/\(uid)/pendingApps/\(pushKey)").removeValue()
+        _ = try? await dbRef.child("users/\(uid)/pendingApps/\(pushKey)").removeValue()
         pendingApps.removeValue(forKey: pushKey)
     }
 
@@ -452,7 +452,7 @@ class RemoteSyncService: ObservableObject {
 
     private func scheduleRelockTimer(after interval: TimeInterval) {
         Task {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, interval)) * 1_000_000_000)
+            _ = try? await Task.sleep(nanoseconds: UInt64(max(0, interval)) * 1_000_000_000)
             if let ts = UserDefaults.standard.value(forKey: "bsafe.relockAt") as? TimeInterval,
                Date() >= Date(timeIntervalSince1970: ts) {
                 await MainActor.run { ActiveScreenTimeSettingsManager.shared.lockAllApps() }
@@ -480,7 +480,7 @@ class RemoteSyncService: ObservableObject {
             if let updData = try? encoder.encode(bypass),
                let updDict = try? JSONSerialization.jsonObject(with: updData) as? [String: Any] {
                 // Delete the bypass code so it can't be reused
-                try? await dbRef.child("users/\(uid)/emergencyBypass").setValue(nil)
+                _ = try? await dbRef.child("users/\(uid)/emergencyBypass").setValue(nil)
                 _ = updDict
             }
             let minutes = bypass.durationMinutes
@@ -503,7 +503,7 @@ class RemoteSyncService: ObservableObject {
         content.body  = note.body
         content.sound = .default
         let request = UNNotificationRequest(identifier: note.id, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        _ = try? await UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Private: DNS Tamper Detection
@@ -522,7 +522,7 @@ class RemoteSyncService: ObservableObject {
             encoder.dateEncodingStrategy = .millisecondsSince1970
             if let data = try? encoder.encode(alert),
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+                _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
         }
 
