@@ -1,4 +1,7 @@
 import SwiftUI
+#if !targetEnvironment(simulator)
+import FamilyControls
+#endif
 
 // MARK: - User List ViewModel
 
@@ -41,6 +44,56 @@ class AdminUserViewModel: ObservableObject {
     @Published var savedSection: String?
     @Published var lastError: String?
 
+    #if !targetEnvironment(simulator)
+    @Published var appSelection = FamilyActivitySelection()
+    #endif
+
+    var hasAppSelection: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return !appSelection.applicationTokens.isEmpty || !appSelection.categoryTokens.isEmpty
+        #endif
+    }
+
+    var appSelectionSummary: String {
+        #if targetEnvironment(simulator)
+        return "Requires real device"
+        #else
+        let apps = appSelection.applicationTokens.count
+        let cats = appSelection.categoryTokens.count
+        if apps == 0 && cats == 0 { return "No apps blocked" }
+        var parts: [String] = []
+        if apps > 0 { parts.append("\(apps) app\(apps == 1 ? "" : "s")") }
+        if cats > 0 { parts.append("\(cats) categor\(cats == 1 ? "y" : "ies")") }
+        return parts.joined(separator: ", ") + " blocked"
+        #endif
+    }
+
+    func serializeAppSelection() {
+        #if !targetEnvironment(simulator)
+        if let data = try? JSONEncoder().encode(appSelection) {
+            config.blockedAppsSelectionData = data.base64EncodedString()
+        }
+        #endif
+    }
+
+    func clearAppSelection() {
+        config.blockedAppsSelectionData = nil
+        #if !targetEnvironment(simulator)
+        appSelection = FamilyActivitySelection()
+        #endif
+    }
+
+    private func deserializeAppSelection() {
+        #if !targetEnvironment(simulator)
+        guard let base64 = config.blockedAppsSelectionData,
+              let data = Data(base64Encoded: base64),
+              let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else { return }
+        appSelection = selection
+        #endif
+    }
+
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -67,6 +120,7 @@ class AdminUserViewModel: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: localKey(uid: uid)),
            let saved = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
             config = saved
+            deserializeAppSelection()
         }
     }
 
@@ -89,7 +143,8 @@ class AdminUserViewModel: ObservableObject {
             }
             if let remote = try? decoder.decode(ScreenTimeConfiguration.self, from: data) {
                 config = remote
-                saveLocally(uid: uid)  // Keep local copy in sync
+                saveLocally(uid: uid)
+                deserializeAppSelection()
             }
             // If decode fails (null or empty), local copy already shown — no reset
         } catch {
@@ -513,50 +568,87 @@ struct AppsTab: View {
     @ObservedObject var vm: AdminUserViewModel
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
+    @State private var showingPicker = false
 
     var body: some View {
         List {
             Section {
+                Button {
+                    showingPicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "app.badge.checkmark").foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Select Apps to Block")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundStyle(.primary)
+                            Text(vm.appSelectionSummary)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if vm.hasAppSelection {
+                    Button("Clear App Selection", role: .destructive) {
+                        vm.clearAppSelection()
+                    }
+                }
+            } header: {
+                Text("Individual App Blocking")
+            } footer: {
+                Text("All apps are allowed by default. Selected apps will show a blocking screen on the device.")
+            }
+
+            Section("Emergency Lock") {
                 Toggle(isOn: $vm.config.isLocked) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Block All Apps")
+                            Text("Block ALL Apps")
                                 .font(.subheadline).fontWeight(.medium)
-                            Text("Shields every app on the device")
+                            Text("Overrides individual selections")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "lock.fill")
-                            .foregroundStyle(.red)
+                        Image(systemName: "lock.fill").foregroundStyle(.red)
                     }
-                }
-            } footer: {
-                Text("When enabled, all applications will show a blocking screen. Disable to restore access.")
-            }
-
-            Section("Website Filtering") {
-                HStack {
-                    Image(systemName: "info.circle").foregroundStyle(.blue)
-                    Text("Configure website blocking in the Websites tab.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
             }
 
             Section {
-                ApplyButton(label: vm.config.isLocked ? "Lock Device Apps" : "Apply App Settings",
-                            icon: vm.config.isLocked ? "lock.fill" : "lock.open.fill",
-                            color: vm.config.isLocked ? .red : .green,
+                ApplyButton(label: "Apply App Settings",
+                            icon: "checkmark.shield.fill",
+                            color: .orange,
                             section: "apps",
                             vm: vm) {
                     Task {
                         let token = await auth.freshToken() ?? ""
-                        let commandType: RemoteCommand.CommandType = vm.config.isLocked ? .lockDevice : .updateBlockedApps
-                        await vm.saveAndSendCommand(commandType, uid: user.uid, idToken: token, section: "apps")
+                        let cmd: RemoteCommand.CommandType = vm.config.isLocked ? .lockDevice : .updateBlockedApps
+                        await vm.saveAndSendCommand(cmd, uid: user.uid, idToken: token, section: "apps")
                     }
                 }
             }
         }
+        #if !targetEnvironment(simulator)
+        .sheet(isPresented: $showingPicker) {
+            NavigationStack {
+                FamilyActivityPicker(selection: $vm.appSelection)
+                    .navigationTitle("Select Apps to Block")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                vm.serializeAppSelection()
+                                showingPicker = false
+                            }
+                        }
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showingPicker = false }
+                        }
+                    }
+            }
+        }
+        #endif
     }
 }
 
@@ -597,6 +689,23 @@ struct CommandsTab: View {
                         vm.savedSection = "refresh"
                         try? await Task.sleep(nanoseconds: 2_500_000_000)
                         vm.savedSection = nil
+                    }
+                }
+            }
+
+            Section("Remove All Restrictions") {
+                CommandRow(icon: "xmark.shield.fill", label: "Clear Everything & Unlock", color: .orange) {
+                    Task {
+                        // Reset config to defaults
+                        vm.config.isLocked = false
+                        vm.config.blockedWebsites = []
+                        vm.config.allowedWebsites = []
+                        vm.config.websiteFilterMode = .blacklist
+                        vm.config.downtimeEnabled = false
+                        vm.clearAppSelection()
+                        // Save to Firebase and unlock device
+                        let token = await auth.freshToken() ?? ""
+                        await vm.saveAndSendCommand(.unlockAll, uid: user.uid, idToken: token, section: "clearall")
                     }
                 }
             }

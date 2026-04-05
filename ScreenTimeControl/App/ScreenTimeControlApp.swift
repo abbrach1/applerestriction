@@ -16,9 +16,14 @@ struct ScreenTimeControlApp: App {
             if !auth.isLoggedIn {
                 LoginView()
                     .environmentObject(auth)
+            } else if auth.isAdmin && !authManager.isAuthorized {
+                AuthorizationView()
+                    .environmentObject(authManager)
+                    .environmentObject(auth)
             } else if auth.isAdmin {
                 AdminDashboardView()
                     .environmentObject(auth)
+                    .environmentObject(authManager)
             } else if !authManager.isAuthorized {
                 AuthorizationView()
                     .environmentObject(authManager)

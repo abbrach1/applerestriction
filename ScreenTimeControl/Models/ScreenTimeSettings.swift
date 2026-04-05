@@ -15,6 +15,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
 
     var blockedApps: Set<String> = []
     var blockedCategories: Set<String> = []
+    var blockedAppsSelectionData: String? = nil  // base64 JSON of FamilyActivitySelection
     var blockedWebsites: [String] = []
     var allowedWebsites: [String] = []
     var websiteFilterMode: WebFilterMode = .blacklist
@@ -32,8 +33,9 @@ extension ScreenTimeConfiguration {
         deviceId          = try c.decodeIfPresent(String.self,        forKey: .deviceId)          ?? ""
         deviceName        = try c.decodeIfPresent(String.self,        forKey: .deviceName)        ?? ""
         lastUpdated       = try c.decodeIfPresent(Date.self,          forKey: .lastUpdated)       ?? Date()
-        blockedApps       = try c.decodeIfPresent(Set<String>.self,   forKey: .blockedApps)       ?? []
-        blockedCategories = try c.decodeIfPresent(Set<String>.self,   forKey: .blockedCategories) ?? []
+        blockedApps            = try c.decodeIfPresent(Set<String>.self, forKey: .blockedApps)            ?? []
+        blockedCategories      = try c.decodeIfPresent(Set<String>.self, forKey: .blockedCategories)      ?? []
+        blockedAppsSelectionData = try c.decodeIfPresent(String.self,   forKey: .blockedAppsSelectionData) ?? nil
         blockedWebsites   = try c.decodeIfPresent([String].self,      forKey: .blockedWebsites)   ?? []
         allowedWebsites   = try c.decodeIfPresent([String].self,      forKey: .allowedWebsites)   ?? []
         websiteFilterMode = try c.decodeIfPresent(WebFilterMode.self, forKey: .websiteFilterMode) ?? .blacklist

@@ -181,23 +181,34 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     func applyRemoteConfiguration(_ config: ScreenTimeConfiguration) {
         configuration = config
+
         if config.isLocked {
             lockAllApps()
             return
         }
+
+        // Downtime
         if config.downtimeEnabled {
             setDowntimeSchedule(config.downtimeSchedule)
         } else {
-            // Clear downtime shields only (disableDowntime calls applyWebsiteRestrictions internally)
             configuration.downtimeEnabled = false
             isDowntimeActive = false
             downtimeTimer?.invalidate()
             downtimeTimer = nil
             store.shield.applicationCategories = nil
         }
-        // App restrictions first (may set applicationCategories)
+
+        // Decode and apply app selection from remote config
+        if let base64 = config.blockedAppsSelectionData,
+           let data = Data(base64Encoded: base64),
+           let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
+            selectedAppsToBlock = selection
+        } else {
+            selectedAppsToBlock = FamilyActivitySelection()
+        }
+
+        // App restrictions first, website restrictions last (so website blocking isn't overwritten)
         applyAppRestrictions()
-        // Website restrictions last — always overwrites webDomainCategories with correct value
         applyWebsiteRestrictions()
     }
 
