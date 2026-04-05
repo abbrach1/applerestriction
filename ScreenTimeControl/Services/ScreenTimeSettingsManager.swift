@@ -42,10 +42,13 @@ class ScreenTimeSettingsManager: ObservableObject {
 
         if categories.isEmpty {
             store.shield.applicationCategories = nil
-            store.shield.webDomainCategories = nil
+            // Do NOT touch webDomainCategories here — managed by applyWebsiteRestrictions
         } else {
             store.shield.applicationCategories = AppPolicy.specific(categories)
-            store.shield.webDomainCategories = WebPolicy.specific(categories)
+            // Only override webDomainCategories for app categories if not already blocking all
+            if !isDowntimeActive && configuration.websiteFilterMode == .blacklist && configuration.blockedWebsites.isEmpty {
+                store.shield.webDomainCategories = WebPolicy.specific(categories)
+            }
         }
 
         configuration.lastUpdated = Date()
@@ -55,7 +58,7 @@ class ScreenTimeSettingsManager: ObservableObject {
     func clearAppRestrictions() {
         store.shield.applications = nil
         store.shield.applicationCategories = nil
-        store.shield.webDomainCategories = nil
+        // Do NOT clear webDomainCategories — managed by applyWebsiteRestrictions
         selectedAppsToBlock = FamilyActivitySelection()
         configuration.lastUpdated = Date()
         saveConfiguration()
@@ -77,7 +80,8 @@ class ScreenTimeSettingsManager: ObservableObject {
         downtimeTimer?.invalidate()
         downtimeTimer = nil
         store.shield.applicationCategories = nil
-        store.shield.webDomainCategories = nil
+        // Restore website restriction state instead of blindly clearing
+        applyWebsiteRestrictions()
         saveConfiguration()
     }
 
@@ -184,10 +188,17 @@ class ScreenTimeSettingsManager: ObservableObject {
         if config.downtimeEnabled {
             setDowntimeSchedule(config.downtimeSchedule)
         } else {
-            disableDowntime()
+            // Clear downtime shields only (disableDowntime calls applyWebsiteRestrictions internally)
+            configuration.downtimeEnabled = false
+            isDowntimeActive = false
+            downtimeTimer?.invalidate()
+            downtimeTimer = nil
+            store.shield.applicationCategories = nil
         }
-        applyWebsiteRestrictions()
+        // App restrictions first (may set applicationCategories)
         applyAppRestrictions()
+        // Website restrictions last — always overwrites webDomainCategories with correct value
+        applyWebsiteRestrictions()
     }
 
     // MARK: - Persistence
