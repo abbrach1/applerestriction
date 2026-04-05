@@ -219,6 +219,31 @@ class RemoteSyncService: ObservableObject {
         }
     }
 
+    /// Manually poll and apply commands + latest settings. Called from ChildDeviceView refresh button.
+    func manualSync() async {
+        let commands = await checkForCommands()
+        for command in commands {
+            await executeCommand(command)
+        }
+        // Also pull and apply the latest saved settings directly
+        guard let user = FirebaseAuthService.shared.currentUser else { return }
+        let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+        if let config = await loadUserSettings(uid: user.uid, idToken: token) {
+            ActiveScreenTimeSettingsManager.shared.applyRemoteConfiguration(config)
+        }
+        lastSyncDate = Date()
+    }
+
+    /// Load the admin-saved ScreenTimeConfiguration for a user from Firebase
+    func loadUserSettings(uid: String, idToken: String) async -> ScreenTimeConfiguration? {
+        guard let url = URL(string: "\(firebaseURL)/users/\(uid)/settings.json?auth=\(idToken)") else { return nil }
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let config = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data) {
+            return config
+        }
+        return nil
+    }
+
     private func executeCommand(_ command: RemoteCommand) async {
         let settingsManager = ActiveScreenTimeSettingsManager.shared
 
@@ -227,13 +252,16 @@ class RemoteSyncService: ObservableObject {
             settingsManager.lockAllApps()
         case .unlockAll:
             settingsManager.unlockAll()
-        case .updateBlockedApps, .updateTimeLimits, .updateDowntime, .refreshSettings:
-            if let config = await pullSettings() {
+        case .updateBlockedApps, .updateTimeLimits, .updateDowntime, .updateWebsites, .refreshSettings:
+            guard let user = FirebaseAuthService.shared.currentUser else { break }
+            let token = await FirebaseAuthService.shared.freshToken() ?? user.idToken
+            if let config = await loadUserSettings(uid: user.uid, idToken: token) {
                 settingsManager.applyRemoteConfiguration(config)
             }
         }
 
         await markCommandExecuted(command.id)
+        lastSyncDate = Date()
     }
 
     // MARK: - Firebase REST Helpers

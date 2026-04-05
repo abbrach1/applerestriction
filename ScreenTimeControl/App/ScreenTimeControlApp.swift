@@ -34,12 +34,15 @@ struct ScreenTimeControlApp: App {
                         }
                     }
             } else {
-                MainTabView()
-                    .environmentObject(authManager)
-                    .environmentObject(settingsManager)
-                    .environmentObject(syncService)
+                ChildDeviceView()
                     .environmentObject(auth)
-                    .onAppear {
+                    .environmentObject(syncService)
+                    .task {
+                        // Register/update device presence in Firebase
+                        if let user = auth.currentUser {
+                            let token = await auth.freshToken() ?? user.idToken
+                            await syncService.registerDevice(uid: user.uid, email: user.email, idToken: token)
+                        }
                         syncService.startPolling()
                     }
             }

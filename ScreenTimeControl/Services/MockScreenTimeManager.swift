@@ -85,8 +85,29 @@ class MockScreenTimeSettingsManager: ObservableObject {
         isDowntimeActive = false
     }
 
+    func applyWebsiteRestrictions() {
+        let config = configuration
+        switch config.websiteFilterMode {
+        case .blacklist:
+            print("[SIMULATOR] Blocking websites: \(config.blockedWebsites)")
+        case .whitelist:
+            print("[SIMULATOR] Whitelist mode — only allowing: \(config.allowedWebsites)")
+        }
+    }
+
     func applyRemoteConfiguration(_ config: ScreenTimeConfiguration) {
         configuration = config
+        if config.isLocked {
+            lockAllApps()
+            return
+        }
+        if config.downtimeEnabled {
+            setDowntimeSchedule(config.downtimeSchedule)
+        } else {
+            disableDowntime()
+        }
+        applyWebsiteRestrictions()
+        applyAppRestrictions()
         print("[SIMULATOR] Applied remote configuration")
     }
 }

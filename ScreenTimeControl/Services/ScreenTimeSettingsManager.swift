@@ -135,15 +135,43 @@ class ScreenTimeSettingsManager: ObservableObject {
         saveConfiguration()
     }
 
+    // MARK: - Website Blocking
+
+    func applyWebsiteRestrictions() {
+        let config = configuration
+        switch config.websiteFilterMode {
+        case .blacklist:
+            let domains = Set(config.blockedWebsites.map { WebDomain(domain: $0) })
+            store.shield.webDomains = domains.isEmpty ? nil : domains
+            // Clear any full-category block from previous whitelist mode
+            if !isDowntimeActive { store.shield.webDomainCategories = nil }
+        case .whitelist:
+            // Block all web domains at category level; individual allowed sites can still be accessed
+            // via Safari's built-in "Allow Website" prompt (best available without content filter extension)
+            store.shield.webDomainCategories = .all()
+            store.shield.webDomains = nil
+        }
+        saveConfiguration()
+    }
+
     // MARK: - Remote Configuration
 
     func applyRemoteConfiguration(_ config: ScreenTimeConfiguration) {
         configuration = config
+        // App lock state
+        if config.isLocked {
+            lockAllApps()
+            return
+        }
+        // Downtime
         if config.downtimeEnabled {
             setDowntimeSchedule(config.downtimeSchedule)
         } else {
             disableDowntime()
         }
+        // Website restrictions
+        applyWebsiteRestrictions()
+        // App restrictions
         applyAppRestrictions()
     }
 

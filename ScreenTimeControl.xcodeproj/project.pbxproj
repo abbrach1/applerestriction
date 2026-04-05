@@ -29,6 +29,7 @@
 		A10022 /* FirebaseAuthService.swift in Sources */      = {isa = PBXBuildFile; fileRef = B10022; };
 		A10023 /* LoginView.swift in Sources */                = {isa = PBXBuildFile; fileRef = B10023; };
 		A10024 /* AdminDashboardView.swift in Sources */       = {isa = PBXBuildFile; fileRef = B10024; };
+		A10030 /* ChildDeviceView.swift in Sources */          = {isa = PBXBuildFile; fileRef = B10030; };
 		/* Extension sources */
 		A20001 /* DeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001; };
 		A30001 /* ShieldConfigurationExtension.swift in Sources */   = {isa = PBXBuildFile; fileRef = B30001; };
@@ -103,6 +104,7 @@
 		B10022 /* FirebaseAuthService.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseAuthService.swift; sourceTree = "<group>"; };
 		B10023 /* LoginView.swift */            = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		B10024 /* AdminDashboardView.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminDashboardView.swift; sourceTree = "<group>"; };
+		B10030 /* ChildDeviceView.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildDeviceView.swift; sourceTree = "<group>"; };
 		/* DeviceActivityMonitor extension */
 		B20001 /* DeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		B20002 /* Info.plist */                           = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 				B10011 /* AuthorizationView.swift */,
 				B10012 /* MainTabView.swift */,
 				B10023 /* LoginView.swift */,
+				B10030 /* ChildDeviceView.swift */,
 				G10010 /* Admin */,
 				G10005 /* Dashboard */,
 				G10006 /* AppPicker */,
@@ -428,6 +431,7 @@
 				A10022 /* FirebaseAuthService.swift */,
 				A10023 /* LoginView.swift */,
 				A10024 /* AdminDashboardView.swift */,
+				A10030 /* ChildDeviceView.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
