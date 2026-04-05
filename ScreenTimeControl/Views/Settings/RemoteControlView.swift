@@ -196,6 +196,7 @@ struct RemoteControlView: View {
         case .updateBlockedApps: return "shield.fill"
         case .updateDowntime: return "moon.fill"
         case .updateTimeLimits: return "timer"
+        case .updateWebsites: return "globe"
         case .refreshSettings: return "arrow.triangle.2.circlepath"
         }
     }

@@ -139,15 +139,17 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     func applyWebsiteRestrictions() {
         let config = configuration
-        switch config.websiteFilterMode {
-        case .blacklist:
-            let domains = Set(config.blockedWebsites.map { WebDomain(domain: $0) })
-            store.shield.webDomains = domains.isEmpty ? nil : domains
-            // Clear any full-category block from previous whitelist mode
-            if !isDowntimeActive { store.shield.webDomainCategories = nil }
-        case .whitelist:
-            // Block all web domains at category level; individual allowed sites can still be accessed
-            // via Safari's built-in "Allow Website" prompt (best available without content filter extension)
+        if config.websiteFilterMode == .blacklist {
+            var webDomains = Set<WebDomain>()
+            for domainStr in config.blockedWebsites {
+                webDomains.insert(WebDomain(domain: domainStr))
+            }
+            store.shield.webDomains = webDomains.isEmpty ? nil : webDomains
+            if !isDowntimeActive {
+                store.shield.webDomainCategories = nil
+            }
+        } else {
+            // Whitelist mode: shield all web domain categories
             store.shield.webDomainCategories = .all()
             store.shield.webDomains = nil
         }
