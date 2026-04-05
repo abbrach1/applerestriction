@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import StoreKit
 
 #if !targetEnvironment(simulator)
 import FamilyControls
@@ -890,7 +891,6 @@ struct PendingAppRow: View {
     @EnvironmentObject var syncService: RemoteSyncService
 
     @State private var isDismissing = false
-    @State private var didOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -920,18 +920,13 @@ struct PendingAppRow: View {
             Spacer()
 
             Button {
-                // Opens App Store directly to the app page — Face ID → Download
-                // No sheet/popup, no crash. itms-apps:// is the native deep link.
-                if let url = URL(string: "itms-apps://itunes.apple.com/app/id\(app.appStoreID)") {
-                    UIApplication.shared.open(url)
-                    didOpen = true
-                }
+                presentOverlay(appID: app.appStoreID)
             } label: {
-                Text(didOpen ? "OPENED" : "GET")
+                Text("GET")
                     .font(.subheadline).fontWeight(.bold)
-                    .foregroundStyle(didOpen ? .green : .blue)
+                    .foregroundStyle(.blue)
                     .padding(.horizontal, 14).padding(.vertical, 6)
-                    .background((didOpen ? Color.green : Color.blue).opacity(0.12))
+                    .background(Color.blue.opacity(0.12))
                     .clipShape(Capsule())
             }
         }
@@ -947,6 +942,17 @@ struct PendingAppRow: View {
                 Label("Dismiss", systemImage: "xmark")
             }
         }
+    }
+
+    /// SKOverlay shows a compact bottom banner — GET button → Face ID → installs.
+    /// Stays inside B-SAFE, no sheet, no App Store navigation.
+    private func presentOverlay(appID: String) {
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
+        else { return }
+        let config = SKOverlay.AppConfiguration(appIdentifier: appID, position: .bottom)
+        let overlay = SKOverlay(configuration: config)
+        overlay.present(in: scene)
     }
 }
 
