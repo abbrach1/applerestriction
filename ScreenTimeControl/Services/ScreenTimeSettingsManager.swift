@@ -172,13 +172,10 @@ class ScreenTimeSettingsManager: ObservableObject {
                 store.shield.webDomainCategories = WebPolicy.all()
             }
         } else {
-            // Whitelist mode: block all web content EXCEPT the allowed domains.
-            let exceptions = Set(configuration.allowedWebsites.map { WebDomain(domain: $0) })
-            if exceptions.isEmpty {
-                store.shield.webDomainCategories = WebPolicy.all()
-            } else {
-                store.shield.webDomainCategories = WebPolicy.all(except: exceptions)
-            }
+            // Whitelist mode: block all web content.
+            // WebPolicy.all(except:) requires opaque WebDomainTokens from FamilyActivityPicker,
+            // not plain domain strings — per-domain exceptions aren't possible via ManagedSettings.
+            store.shield.webDomainCategories = WebPolicy.all()
         }
         saveConfiguration()
     }
