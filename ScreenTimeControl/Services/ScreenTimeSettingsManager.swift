@@ -172,10 +172,17 @@ class ScreenTimeSettingsManager: ObservableObject {
                 store.shield.webDomainCategories = WebPolicy.all()
             }
         } else {
-            // Whitelist mode: block all web content.
-            // WebPolicy.all(except:) requires opaque WebDomainTokens from FamilyActivityPicker,
-            // not plain domain strings — per-domain exceptions aren't possible via ManagedSettings.
-            store.shield.webDomainCategories = WebPolicy.all()
+            // Whitelist mode: block all content EXCEPT sites selected via child-device picker.
+            // Tokens are stored locally since they're device-specific (can't be generated remotely).
+            if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
+               let data = Data(base64Encoded: base64),
+               let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data),
+               !selection.webDomainTokens.isEmpty {
+                store.shield.webDomainCategories = WebPolicy.all(except: selection.webDomainTokens)
+            } else {
+                // No sites configured yet — block everything until setup is run on device
+                store.shield.webDomainCategories = WebPolicy.all()
+            }
         }
         saveConfiguration()
     }

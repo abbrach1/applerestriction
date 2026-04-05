@@ -44,6 +44,13 @@ class AdminUserViewModel: ObservableObject {
     @Published var savedSection: String?
     @Published var lastError: String?
     @Published var appListReport: AppListReport?
+    @Published var websiteSetupInfo: WebsiteSetupInfo?
+
+    struct WebsiteSetupInfo {
+        let siteCount: Int
+        let categoryCount: Int
+        let timestamp: Date
+    }
 
     #if !targetEnvironment(simulator)
     @Published var appSelection = FamilyActivitySelection()
@@ -136,6 +143,7 @@ class AdminUserViewModel: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.loadSettings(uid: uid, idToken: idToken) }
             group.addTask { await self.loadAppList(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadWebsiteSetup(uid: uid, idToken: idToken) }
         }
 
         isLoading = false
@@ -164,6 +172,21 @@ class AdminUserViewModel: ObservableObject {
         if let (data, _) = try? await URLSession.shared.data(from: url),
            let report = try? decoder.decode(AppListReport.self, from: data) {
             appListReport = report
+        }
+    }
+
+    func loadWebsiteSetup(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/websiteSetup.json?auth=\(idToken)") else { return }
+        if let (data, _) = try? await URLSession.shared.data(from: url),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let sites = dict["siteCount"] as? Int ?? 0
+            let cats  = dict["categoryCount"] as? Int ?? 0
+            let ms    = dict["timestamp"] as? Double ?? 0
+            websiteSetupInfo = WebsiteSetupInfo(
+                siteCount: sites,
+                categoryCount: cats,
+                timestamp: Date(timeIntervalSince1970: ms / 1000)
+            )
         }
     }
 
@@ -396,6 +419,34 @@ struct WebsiteTab: View {
 
     var body: some View {
         List {
+            // Child device setup status
+            if let info = vm.websiteSetupInfo {
+                Section {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.12))
+                                .frame(width: 40, height: 40)
+                            Image(systemName: "checkmark.shield.fill")
+                                .foregroundStyle(.green)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Device whitelist configured")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("\(info.siteCount) site\(info.siteCount == 1 ? "" : "s") · \(info.categoryCount) categories")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(info.timestamp.formatted(.relative(presentation: .named)))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("Child Device Setup")
+                } footer: {
+                    Text("Child ran Website Whitelist Setup on their device. Switching to 'Allow Only Listed Sites' will allow exactly those sites.")
+                }
+            }
+
             Section {
                 Picker("Filter Mode", selection: $vm.config.websiteFilterMode) {
                     Text("Block Listed Sites").tag(WebFilterMode.blacklist)
@@ -406,10 +457,16 @@ struct WebsiteTab: View {
             } header: {
                 Text("Mode")
             } footer: {
-                Text(vm.config.websiteFilterMode == .blacklist
-                     ? "Add sites to block. When the list is empty, web browsing is unrestricted."
-                     : "ALL websites are blocked on the device. The list is saved for reference only — per-site exceptions require tokens from the device and cannot be set remotely.")
-                    .font(.caption)
+                if vm.config.websiteFilterMode == .blacklist {
+                    Text("Blacklist: listed sites are blocked. Empty list = unrestricted browsing.")
+                        .font(.caption)
+                } else if vm.websiteSetupInfo != nil {
+                    Text("Whitelist: only the sites configured on the child's device are allowed. All others are blocked.")
+                        .font(.caption)
+                } else {
+                    Text("Whitelist: ALL websites will be blocked until the child runs Website Whitelist Setup on their device.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
 
             if vm.config.websiteFilterMode == .blacklist {
@@ -743,6 +800,14 @@ struct AppsTab: View {
             let token = await auth.freshToken() ?? ""
             await vm.loadAppList(uid: user.uid, idToken: token)
         }
+    }
+}
+
+// WebsiteTab has its own refresh for websiteSetupInfo
+extension WebsiteTab {
+    func refreshSetupInfo() async {
+        let token = await auth.freshToken() ?? ""
+        await vm.loadWebsiteSetup(uid: user.uid, idToken: token)
     }
 }
 

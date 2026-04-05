@@ -11,6 +11,7 @@ struct ChildDeviceView: View {
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @State private var isRefreshing = false
     @State private var showAdminSetup = false
+    @State private var showWebsiteSetup = false
     @State private var showSendAppList = false
     @State private var isSendingList = false
     @State private var listSentMessage: String?
@@ -129,10 +130,15 @@ struct ChildDeviceView: View {
 
                 Section {
                     Button("Sign Out", role: .destructive) { auth.signOut() }
-                    // Hidden admin setup — tap 5 times on version label to unlock
-                    Button("Admin Setup") { showAdminSetup = true }
+                    Button("App Blocking Setup") { showAdminSetup = true }
                         .foregroundStyle(.secondary)
                         .font(.caption)
+                    Button("Website Whitelist Setup") { showWebsiteSetup = true }
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                } footer: {
+                    Text("App Blocking and Website Whitelist Setup require the admin PIN. Run these on the child's device to configure which apps are blocked and which websites are allowed.")
+                        .font(.caption2)
                 }
             }
             .navigationTitle("B-SAFE")
@@ -141,6 +147,11 @@ struct ChildDeviceView: View {
                 AdminSetupSheet()
                     .environmentObject(auth)
                     .environmentObject(syncService)
+                    .environmentObject(settingsManager)
+            }
+            .sheet(isPresented: $showWebsiteSetup) {
+                WebsiteSetupSheet()
+                    .environmentObject(auth)
                     .environmentObject(settingsManager)
             }
             #if !targetEnvironment(simulator)
@@ -473,6 +484,209 @@ struct AdminSetupSheet: View {
 
         isSaving = false
         savedMessage = "App restrictions saved and applied!"
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        savedMessage = nil
+    }
+}
+
+// MARK: - Website Setup Sheet (PIN-protected, runs on child device)
+
+struct WebsiteSetupSheet: View {
+    @EnvironmentObject var auth: FirebaseAuthService
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var isUnlocked = false
+    @State private var enteredPin = ""
+    @State private var showPicker = false
+    @State private var isSaving = false
+    @State private var savedMessage: String?
+    #if !targetEnvironment(simulator)
+    @State private var webSelection = FamilyActivitySelection()
+    #endif
+    private let adminPin = "bsafe1"
+
+    var body: some View {
+        NavigationStack {
+            if isUnlocked {
+                unlockedView
+            } else {
+                pinEntryView
+            }
+        }
+    }
+
+    var pinEntryView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.system(size: 60))
+                .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+            Text("Website Setup")
+                .font(.title2).fontWeight(.bold)
+            Text("Enter the admin PIN to configure which websites are allowed in whitelist mode.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            SecureField("Admin PIN", text: $enteredPin)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+                .frame(maxWidth: 200)
+                .multilineTextAlignment(.center)
+
+            Button("Unlock") {
+                if enteredPin == adminPin {
+                    isUnlocked = true
+                    loadCurrentSelection()
+                } else {
+                    enteredPin = ""
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(red: 0, green: 0.4, blue: 0.15))
+            .disabled(enteredPin.isEmpty)
+            Spacer()
+        }
+        .navigationTitle("Website Setup")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+    }
+
+    var unlockedView: some View {
+        List {
+            Section {
+                Button {
+                    showPicker = true
+                } label: {
+                    HStack {
+                        Image(systemName: "globe.badge.checkmark").foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Select Allowed Websites")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundStyle(.primary)
+                            Text(selectionSummary)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Whitelist Configuration")
+            } footer: {
+                Text("Select all websites this device should be allowed to visit. These become the whitelist when admin enables 'Allow Only Listed Sites' mode. Websites appear from browsing history.")
+            }
+
+            if let msg = savedMessage {
+                Section {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text(msg).foregroundStyle(.green)
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await saveWebsiteSelection() }
+                } label: {
+                    HStack {
+                        if isSaving { ProgressView().tint(.white) }
+                        else { Image(systemName: "icloud.and.arrow.up") }
+                        Text(isSaving ? "Saving..." : "Save & Apply")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(red: 0, green: 0.4, blue: 0.15))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(isSaving)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+        }
+        .navigationTitle("Website Setup")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        #if !targetEnvironment(simulator)
+        .sheet(isPresented: $showPicker) {
+            NavigationStack {
+                FamilyActivityPicker(selection: $webSelection)
+                    .navigationTitle("Select Allowed Sites")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showPicker = false }
+                        }
+                    }
+            }
+        }
+        #endif
+    }
+
+    #if targetEnvironment(simulator)
+    var selectionSummary: String { "Requires real device" }
+    #else
+    var selectionSummary: String {
+        let sites = webSelection.webDomainTokens.count
+        let cats = webSelection.categoryTokens.count
+        if sites == 0 && cats == 0 { return "No sites selected yet" }
+        var parts: [String] = []
+        if sites > 0 { parts.append("\(sites) website\(sites == 1 ? "" : "s")") }
+        if cats > 0 { parts.append("\(cats) categor\(cats == 1 ? "y" : "ies")") }
+        return parts.joined(separator: ", ") + " allowed"
+    }
+    #endif
+
+    private func loadCurrentSelection() {
+        #if !targetEnvironment(simulator)
+        guard let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
+              let data = Data(base64Encoded: base64),
+              let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else { return }
+        webSelection = selection
+        #endif
+    }
+
+    private func saveWebsiteSelection() async {
+        isSaving = true
+        #if !targetEnvironment(simulator)
+        // Store tokens locally (device-specific, used in applyWebsiteRestrictions)
+        if let data = try? JSONEncoder().encode(webSelection) {
+            UserDefaults.standard.set(data.base64EncodedString(), forKey: "screentime.websiteSelection")
+        }
+        // Apply immediately
+        settingsManager.applyWebsiteRestrictions()
+
+        // Also upload count info to Firebase so admin can see the setup status
+        guard let user = auth.currentUser else { isSaving = false; return }
+        let token = await auth.freshToken() ?? user.idToken
+        let report: [String: Any] = [
+            "siteCount": webSelection.webDomainTokens.count,
+            "categoryCount": webSelection.categoryTokens.count,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        if let url = URL(string: "https://applerestrictions-default-rtdb.firebaseio.com/users/\(user.uid)/websiteSetup.json?auth=\(token)"),
+           let body = try? JSONSerialization.data(withJSONObject: report) {
+            var req = URLRequest(url: url)
+            req.httpMethod = "PUT"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = body
+            _ = try? await URLSession.shared.data(for: req)
+        }
+        #endif
+        isSaving = false
+        savedMessage = "Saved! \(selectionSummary)"
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         savedMessage = nil
     }
