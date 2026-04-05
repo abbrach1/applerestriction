@@ -190,6 +190,25 @@ extension AdminNotification {
     }
 }
 
+// MARK: - Unlock Request (child → admin, stored at /users/uid/unlockRequests/{autoId})
+
+struct UnlockRequest: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var reason: String = ""
+    var timestamp: Date = Date()
+    var deviceName: String = ""
+}
+
+extension UnlockRequest {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try c.decodeIfPresent(String.self, forKey: .id)         ?? UUID().uuidString
+        reason     = try c.decodeIfPresent(String.self, forKey: .reason)     ?? ""
+        timestamp  = try c.decodeIfPresent(Date.self,   forKey: .timestamp)  ?? Date()
+        deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
+    }
+}
+
 // MARK: - App List Report (child → admin, stored at /users/uid/appList)
 
 struct AppListReport: Codable {

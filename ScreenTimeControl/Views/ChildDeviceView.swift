@@ -11,6 +11,7 @@ struct ChildDeviceView: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @EnvironmentObject var syncService: RemoteSyncService
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+    @EnvironmentObject var authManager: ActiveAuthorizationManager
     @State private var isRefreshing = false
     @State private var showAdminSetup = false
     @State private var showWebsiteSetup = false
@@ -20,6 +21,9 @@ struct ChildDeviceView: View {
     @State private var contentBlockerEnabled: Bool = true  // assume enabled until checked
     @State private var isEditingName = false
     @State private var nameInput = ""
+    @State private var showUnlockRequest = false
+    @State private var unlockReason = ""
+    @State private var showChecklist = false
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -251,8 +255,63 @@ struct ChildDeviceView: View {
                 } header: { Text("App Review") }
                   footer: { Text("If new app installs are blocked, send your app list to request admin approval.") }
 
+                // Unlock request
+                Section {
+                    if syncService.pendingUnlockRequest != nil {
+                        HStack(spacing: 12) {
+                            ProgressView().tint(Color(red: 0, green: 0.4, blue: 0.15))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Unlock request pending")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Waiting for admin approval")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Cancel") {
+                                Task { await syncService.cancelUnlockRequest() }
+                            }
+                            .font(.caption).foregroundStyle(.red)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        Button {
+                            unlockReason = ""
+                            showUnlockRequest = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "lock.open.fill")
+                                    .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Request Unlock")
+                                        .foregroundStyle(.primary)
+                                    Text("Ask admin to temporarily unlock the device")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } header: { Text("Unlock Request") }
+                .alert("Request Unlock", isPresented: $showUnlockRequest) {
+                    TextField("Reason (optional)", text: $unlockReason)
+                        .autocorrectionDisabled()
+                    Button("Send Request") {
+                        let r = unlockReason.trimmingCharacters(in: .whitespaces)
+                        Task { await syncService.sendUnlockRequest(reason: r) }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Your admin will receive a notification and can approve or deny.")
+                }
+
                 Section {
                     Button("Sign Out", role: .destructive) { auth.signOut() }
+                    Button {
+                        showChecklist = true
+                    } label: {
+                        Label("Setup Checklist", systemImage: "checklist")
+                            .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+                            .font(.caption)
+                    }
                     Button("App Blocking Setup") { showAdminSetup = true }
                         .foregroundStyle(.secondary)
                         .font(.caption)
@@ -262,6 +321,13 @@ struct ChildDeviceView: View {
                 } footer: {
                     Text("App Blocking and Website Whitelist Setup require the admin PIN. Run these on the child's device to configure which apps are blocked and which websites are allowed.")
                         .font(.caption2)
+                }
+                .sheet(isPresented: $showChecklist) {
+                    SetupChecklistView()
+                        .environmentObject(auth)
+                        .environmentObject(syncService)
+                        .environmentObject(settingsManager)
+                        .environmentObject(authManager)
                 }
             }
             .navigationTitle("B-SAFE")
@@ -1084,5 +1150,141 @@ struct StatusRow: View {
                 .padding(.vertical, 3)
                 .background(active ? color.opacity(0.12) : Color.clear, in: Capsule())
         }
+    }
+}
+
+// MARK: - Setup Checklist
+
+struct SetupChecklistView: View {
+    @EnvironmentObject var auth: FirebaseAuthService
+    @EnvironmentObject var syncService: RemoteSyncService
+    @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
+    @EnvironmentObject var authManager: ActiveAuthorizationManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var notifStatus: UNAuthorizationStatus = .notDetermined
+    @State private var contentBlockerOn = false
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ChecklistRow(
+                        title: "Screen Time Authorized",
+                        detail: "Allows B-SAFE to enforce restrictions",
+                        done: authManager.isAuthorized,
+                        action: authManager.isAuthorized ? nil : {
+                            Task { await authManager.requestAuthorization() }
+                        },
+                        actionLabel: "Authorize"
+                    )
+
+                    ChecklistRow(
+                        title: "Notifications Allowed",
+                        detail: "Admin can send alerts to this device",
+                        done: notifStatus == .authorized || notifStatus == .provisional,
+                        action: notifStatus == .denied ? {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } : (notifStatus == .notDetermined ? {
+                            syncService.requestNotificationPermission()
+                        } : nil),
+                        actionLabel: notifStatus == .denied ? "Open Settings" : "Enable"
+                    )
+
+                    ChecklistRow(
+                        title: "Content Blocker Active",
+                        detail: "Enables website filtering in Safari",
+                        done: contentBlockerOn,
+                        action: contentBlockerOn ? nil : {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        },
+                        actionLabel: "Open Settings"
+                    )
+
+                    ChecklistRow(
+                        title: "Connected to Admin",
+                        detail: "Real-time sync with admin dashboard",
+                        done: syncService.isOnline,
+                        action: nil,
+                        actionLabel: nil
+                    )
+
+                    ChecklistRow(
+                        title: "Name Set",
+                        detail: "Admin can identify this device by name",
+                        done: !syncService.displayName.isEmpty,
+                        action: nil,
+                        actionLabel: nil
+                    )
+                } header: {
+                    Text("Setup Status")
+                } footer: {
+                    let doneCount = [
+                        authManager.isAuthorized,
+                        notifStatus == .authorized || notifStatus == .provisional,
+                        contentBlockerOn,
+                        syncService.isOnline,
+                        !syncService.displayName.isEmpty
+                    ].filter { $0 }.count
+                    Text("\(doneCount) of 5 steps complete")
+                }
+            }
+            .navigationTitle("Setup Checklist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task {
+                await loadStatuses()
+                isLoading = false
+            }
+        }
+    }
+
+    private func loadStatuses() async {
+        notifStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        #if !targetEnvironment(simulator)
+        let id = "com.abbrachfeld.screentimecontrolabbrach.BSAFEContentBlocker"
+        if let state = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: id) {
+            contentBlockerOn = state.isEnabled
+        }
+        #endif
+    }
+}
+
+struct ChecklistRow: View {
+    let title: String
+    let detail: String
+    let done: Bool
+    let action: (() -> Void)?
+    let actionLabel: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(done ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline).fontWeight(.medium)
+                Text(detail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !done, let action, let label = actionLabel {
+                Button(label, action: action)
+                    .font(.caption).fontWeight(.semibold)
+                    .buttonStyle(.bordered)
+                    .tint(Color(red: 0, green: 0.4, blue: 0.15))
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

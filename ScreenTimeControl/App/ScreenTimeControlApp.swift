@@ -64,6 +64,7 @@ struct ScreenTimeControlApp: App {
                     .environmentObject(auth)
                     .environmentObject(syncService)
                     .environmentObject(settingsManager)
+                    .environmentObject(authManager)
                     .task {
                         syncService.requestNotificationPermission()
                         if let user = auth.currentUser {

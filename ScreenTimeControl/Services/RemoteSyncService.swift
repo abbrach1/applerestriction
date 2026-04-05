@@ -22,6 +22,7 @@ class RemoteSyncService: ObservableObject {
     @Published var pendingWebsites: [String: String] = [:]
     @Published var pendingApps: [String: RecommendedApp] = [:]
     @Published var displayName: String = ""
+    @Published var pendingUnlockRequest: (key: String, request: UnlockRequest)? = nil
 
     // Keep for legacy compatibility
     @Published var isPaired: Bool = false
@@ -178,6 +179,21 @@ class RemoteSyncService: ObservableObject {
             await self.deliverLocalNotification(note)
             try? await snapshot.ref.removeValue()   // delete after delivering
         }
+
+        // Unlock requests — watch so child sees when admin approves/denies
+        observe(userRef.child("unlockRequests")) { [weak self] snapshot in
+            guard let self else { return }
+            if let dict = snapshot.value as? [String: Any],
+               let (key, val) = dict.first,
+               let data = try? JSONSerialization.data(withJSONObject: val) {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .millisecondsSince1970
+                let req = try? decoder.decode(UnlockRequest.self, from: data)
+                await MainActor.run { self.pendingUnlockRequest = req.map { (key, $0) } }
+            } else {
+                await MainActor.run { self.pendingUnlockRequest = nil }
+            }
+        }
     }
 
     func stopListening() {
@@ -245,6 +261,29 @@ class RemoteSyncService: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         displayName = name
         try? await dbRef.child("users/\(uid)/info/displayName").setValue(name)
+    }
+
+    // MARK: - Unlock Requests
+
+    func sendUnlockRequest(reason: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let req = UnlockRequest(
+            reason: reason,
+            timestamp: Date(),
+            deviceName: DeviceInfo.current.name
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let data = try? encoder.encode(req),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        try? await dbRef.child("users/\(uid)/unlockRequests").childByAutoId().setValue(dict)
+    }
+
+    func cancelUnlockRequest() async {
+        guard let uid = Auth.auth().currentUser?.uid,
+              let key = pendingUnlockRequest?.key else { return }
+        try? await dbRef.child("users/\(uid)/unlockRequests/\(key)").removeValue()
+        pendingUnlockRequest = nil
     }
 
     // MARK: - Manual Sync (refresh button)

@@ -8,6 +8,12 @@ struct SettingsView: View {
 
     @State private var showRevokeAlert = false
 
+    private var appVersion: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(v) (\(b))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -42,10 +48,25 @@ struct SettingsView: View {
                     HStack {
                         Text("Screen Time Access")
                         Spacer()
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Authorized")
-                            .foregroundStyle(.green)
+                        if authManager.isAuthorized {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            Text("Authorized").foregroundStyle(.green)
+                        } else {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                            Text("Not Authorized").foregroundStyle(.orange)
+                        }
+                    }
+
+                    if !authManager.isAuthorized {
+                        Button {
+                            Task { await authManager.requestAuthorization() }
+                        } label: {
+                            HStack {
+                                if authManager.isRequesting { ProgressView() }
+                                Text("Re-authorize Screen Time")
+                            }
+                        }
+                        .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
                     }
 
                     Button(role: .destructive) {
@@ -63,13 +84,12 @@ struct SettingsView: View {
                 Section {
                     Button(role: .destructive) {
                         settingsManager.unlockAll()
-                        syncService.stopPolling()
                     } label: {
                         Text("Remove All Restrictions")
                     }
                 }
 
-                // About
+                // Account
                 Section {
                     if let user = auth.currentUser {
                         HStack {
@@ -93,13 +113,12 @@ struct SettingsView: View {
                         Spacer()
                         Text("B-SAFE")
                             .foregroundStyle(.secondary)
-                            .font(.caption)
                     }
 
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(appVersion)
                             .foregroundStyle(.secondary)
                     }
 

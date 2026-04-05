@@ -12,6 +12,14 @@ class AdminViewModel: ObservableObject {
 
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
+    func deleteUser(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        users.removeAll { $0.uid == uid }
+    }
+
     func loadUsers(idToken: String) async {
         isLoading = true
         guard let url = URL(string: "\(dbURL)/users.json?auth=\(idToken)") else { isLoading = false; return }
@@ -29,7 +37,10 @@ class AdminViewModel: ObservableObject {
                     isOnline: info["isOnline"] as? Bool ?? false,
                     lastSeen: info["lastSeen"] as? String ?? ""
                 )
-            }.sorted { $0.email < $1.email }
+            }.sorted { a, b in
+                if a.isOnline != b.isOnline { return a.isOnline }
+                return a.lastSeen > b.lastSeen
+            }
         }
         isLoading = false
     }
@@ -47,6 +58,7 @@ class AdminUserViewModel: ObservableObject {
     @Published var appListReport: AppListReport?
     @Published var websiteSetupInfo: WebsiteSetupInfo?
     @Published var tamperAlerts: [(pushKey: String, alert: TamperAlert)] = []
+    @Published var unlockRequests: [(pushKey: String, request: UnlockRequest)] = []
 
     struct WebsiteSetupInfo {
         let siteCount: Int
@@ -147,6 +159,7 @@ class AdminUserViewModel: ObservableObject {
             group.addTask { await self.loadAppList(uid: uid, idToken: idToken) }
             group.addTask { await self.loadWebsiteSetup(uid: uid, idToken: idToken) }
             group.addTask { await self.loadTamperAlerts(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadUnlockRequests(uid: uid, idToken: idToken) }
         }
 
         isLoading = false
@@ -218,6 +231,46 @@ class AdminUserViewModel: ObservableObject {
         tamperAlerts.removeAll { $0.pushKey == pushKey }
     }
 
+    func loadUnlockRequests(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/unlockRequests.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .millisecondsSince1970
+        var results: [(pushKey: String, request: UnlockRequest)] = []
+        for (key, val) in dict {
+            if let d = try? JSONSerialization.data(withJSONObject: val),
+               let req = try? dec.decode(UnlockRequest.self, from: d) {
+                results.append((pushKey: key, request: req))
+            }
+        }
+        unlockRequests = results.sorted { $0.request.timestamp > $1.request.timestamp }
+    }
+
+    func approveUnlockRequest(pushKey: String, uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/unlockRequests/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        unlockRequests.removeAll { $0.pushKey == pushKey }
+        await sendCommand(.unlockAll, uid: uid, idToken: idToken)
+    }
+
+    func denyUnlockRequest(pushKey: String, uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/unlockRequests/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        unlockRequests.removeAll { $0.pushKey == pushKey }
+    }
+
+    func deleteUser(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
     func markAppListReviewed(uid: String, idToken: String) async {
         guard var report = appListReport else { return }
         report.reviewed = true
@@ -286,6 +339,8 @@ struct AdminDashboardView: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @StateObject private var vm = AdminViewModel()
 
+    private var onlineCount: Int { vm.users.filter(\.isOnline).count }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -298,32 +353,46 @@ struct AdminDashboardView: View {
                         description: Text("Add users in Firebase Console under Authentication.")
                     )
                 } else {
-                    List(vm.users) { user in
-                        NavigationLink {
-                            AdminUserControlView(user: user)
-                                .environmentObject(auth)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Circle()
-                                    .fill(user.isOnline ? Color.green : Color.gray.opacity(0.4))
-                                    .frame(width: 10, height: 10)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(user.primaryLabel)
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Text(user.secondaryLabel)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    List {
+                        ForEach(vm.users) { user in
+                            NavigationLink {
+                                AdminUserControlView(user: user)
+                                    .environmentObject(auth)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(user.isOnline ? Color.green : Color.gray.opacity(0.4))
+                                        .frame(width: 10, height: 10)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(user.primaryLabel)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text(user.secondaryLabel)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if user.isOnline {
+                                        Text("Online")
+                                            .font(.caption2)
+                                            .foregroundStyle(.green)
+                                    } else if !user.lastSeen.isEmpty {
+                                        Text(relativeLastSeen(user.lastSeen))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                                Spacer()
-                                if user.isOnline {
-                                    Text("Online")
-                                        .font(.caption2)
-                                        .foregroundStyle(.green)
-                                } else if !user.lastSeen.isEmpty {
-                                    Text(relativeLastSeen(user.lastSeen))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        let token = await auth.freshToken() ?? ""
+                                        await vm.deleteUser(uid: user.uid, idToken: token)
+                                        let refreshToken = await auth.freshToken() ?? ""
+                                        await vm.loadUsers(idToken: refreshToken)
+                                    }
+                                } label: {
+                                    Label("Remove", systemImage: "trash")
                                 }
                             }
                         }
@@ -333,13 +402,21 @@ struct AdminDashboardView: View {
             .navigationTitle("Managed Devices")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        Task {
-                            let token = await auth.freshToken() ?? ""
-                            await vm.loadUsers(idToken: token)
+                    HStack(spacing: 12) {
+                        if onlineCount > 0 {
+                            Label("\(onlineCount) online", systemImage: "circle.fill")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption)
+                                .foregroundStyle(.green)
                         }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                        Button {
+                            Task {
+                                let token = await auth.freshToken() ?? ""
+                                await vm.loadUsers(idToken: token)
+                            }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -1322,6 +1399,65 @@ struct CommandsTab: View {
 
     var body: some View {
         List {
+            // Unlock Requests
+            if !vm.unlockRequests.isEmpty {
+                Section {
+                    ForEach(vm.unlockRequests, id: \.pushKey) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "lock.open.fill")
+                                    .foregroundStyle(.orange)
+                                Text(item.request.deviceName.isEmpty ? "Unknown device" : item.request.deviceName)
+                                    .font(.subheadline).fontWeight(.medium)
+                                Spacer()
+                                Text(item.request.timestamp.formatted(.relative(presentation: .named)))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if !item.request.reason.isEmpty {
+                                Text("\"\(item.request.reason)\"")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .italic()
+                            }
+                            HStack(spacing: 10) {
+                                Button {
+                                    Task {
+                                        let token = await auth.freshToken() ?? ""
+                                        await vm.approveUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                    }
+                                } label: {
+                                    Text("Approve")
+                                        .font(.caption).fontWeight(.semibold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                        .background(Color.green)
+                                        .foregroundStyle(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                }
+                                Button {
+                                    Task {
+                                        let token = await auth.freshToken() ?? ""
+                                        await vm.denyUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                    }
+                                } label: {
+                                    Text("Deny")
+                                        .font(.caption).fontWeight(.semibold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                        .background(Color.red.opacity(0.15))
+                                        .foregroundStyle(.red)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Label("Unlock Requests", systemImage: "lock.open.fill")
+                } footer: {
+                    Text("Approve to send an unlock command. The device unlocks within 30 seconds.")
+                }
+            }
+
             // Send Notification
             Section {
                 TextField("Title (optional)", text: $notifTitle)
