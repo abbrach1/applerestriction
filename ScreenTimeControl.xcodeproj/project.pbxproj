@@ -388,9 +388,6 @@
 			projectRoot = "";
 			targets = (
 				T10000 /* ScreenTimeControl */,
-				T20000 /* DeviceActivityMonitor */,
-				T30000 /* ShieldConfiguration */,
-				T40000 /* ShieldAction */,
 			);
 		};
 /* End PBXProject section */
