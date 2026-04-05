@@ -245,11 +245,23 @@ struct ChildDeviceView: View {
     }
 
     private func websiteFilterStatus(_ config: ScreenTimeConfiguration) -> String {
-        guard isWebsiteFilterActive(config) else { return "Off" }
         if config.websiteFilterMode == .whitelist {
-            return "Whitelist (\(config.allowedWebsites.count) allowed)"
+            let count = localWhitelistCount()
+            return count > 0 ? "Whitelist (\(count) site\(count == 1 ? "" : "s"))" : "Whitelist — no sites set up yet"
         }
-        return "Blocking \(config.blockedWebsites.count) site(s)"
+        if config.blockedWebsites.isEmpty { return "Off" }
+        return "Blocking \(config.blockedWebsites.count) site\(config.blockedWebsites.count == 1 ? "" : "s")"
+    }
+
+    private func localWhitelistCount() -> Int {
+        #if targetEnvironment(simulator)
+        return 0
+        #else
+        guard let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
+              let data = Data(base64Encoded: base64),
+              let sel = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else { return 0 }
+        return sel.webDomainTokens.count + sel.categoryTokens.count
+        #endif
     }
 
     private func isAppBlockingActive(_ config: ScreenTimeConfiguration) -> Bool {
@@ -721,6 +733,7 @@ struct PendingWebsiteRow: View {
     @State private var showSafari = false
     @State private var isAdding = false
     @State private var added = false
+    @State private var needsWhitelistMode = false
     #if !targetEnvironment(simulator)
     @State private var pickerSelection = FamilyActivitySelection()
     #endif
@@ -741,6 +754,12 @@ struct PendingWebsiteRow: View {
                 if added {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 }
+            }
+
+            if needsWhitelistMode {
+                Label("Saved! Ask admin to enable \"Allow Only Listed Sites\" mode so this takes effect.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
             }
 
             HStack(spacing: 8) {
@@ -834,8 +853,9 @@ struct PendingWebsiteRow: View {
             UserDefaults.standard.set(data.base64EncodedString(), forKey: "screentime.websiteSelection")
         }
 
-        // Apply immediately
+        // Apply immediately — only has effect if admin has enabled whitelist mode
         settingsManager.applyWebsiteRestrictions()
+        needsWhitelistMode = settingsManager.configuration.websiteFilterMode != .whitelist
 
         // Update Firebase setup info
         if let user = auth.currentUser {
