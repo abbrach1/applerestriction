@@ -9,6 +9,7 @@
     <key>com.apple.developer.networking.networkextension</key>
     <array>
         <string>filter-data-provider</string>
+        <string>app-proxy-provider</string>
     </array>
 </dict>
 </plist>
