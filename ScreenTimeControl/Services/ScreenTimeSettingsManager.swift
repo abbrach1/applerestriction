@@ -203,7 +203,10 @@ class ScreenTimeSettingsManager: ObservableObject {
         if config.isLocked {
             lockAllApps()
             ContentBlockerService.shared.applyRules(for: config)
-            Task { if config.forceDNS { await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID) } }
+            Task {
+                if config.forceDNS { await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID) }
+                await ContentFilterService.shared.enable(config: config)
+            }
             return
         }
 
@@ -246,6 +249,13 @@ class ScreenTimeSettingsManager: ObservableObject {
                 await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
             } else {
                 await ContentBlockerService.shared.disableForcedDNS()
+            }
+            // Content filter: enable whenever there are website restrictions or device is locked
+            let hasWebRestrictions = !config.blockedWebsites.isEmpty || config.websiteFilterMode == .whitelist
+            if hasWebRestrictions || config.isLocked {
+                await ContentFilterService.shared.enable(config: config)
+            } else {
+                await ContentFilterService.shared.disable()
             }
         }
     }
