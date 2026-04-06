@@ -251,19 +251,21 @@ struct ChildDeviceView: View {
                           detail: "Go to Settings → Safari → Extensions → enable B-SAFE Content Blocker")
         }
         if !syncService.pendingWebsites.isEmpty {
+            let websiteItems = Array(syncService.pendingWebsites)
             pendingCard(header: "Websites from Admin", icon: "globe.badge.exclamationmark") {
-                ForEach(Array(syncService.pendingWebsites), id: \.key) { pushKey, domain in
-                    PendingWebsiteRow(pushKey: pushKey, domain: domain)
+                ForEach(websiteItems, id: \.key) { item in
+                    PendingWebsiteRow(pushKey: item.key, domain: item.value)
                         .environmentObject(auth).environmentObject(syncService).environmentObject(settingsManager)
-                    if domain != syncService.pendingWebsites.values.last { Divider() }
+                    if item.key != websiteItems.last?.key { Divider() }
                 }
             }
         }
         if !syncService.pendingApps.isEmpty {
+            let appItems = Array(syncService.pendingApps)
             pendingCard(header: "Apps from Admin", icon: "arrow.down.app.fill") {
-                ForEach(Array(syncService.pendingApps), id: \.key) { pushKey, app in
-                    PendingAppRow(pushKey: pushKey, app: app).environmentObject(syncService)
-                    if app.id != syncService.pendingApps.values.last?.id { Divider() }
+                ForEach(appItems, id: \.key) { item in
+                    PendingAppRow(pushKey: item.key, app: item.value).environmentObject(syncService)
+                    if item.key != appItems.last?.key { Divider() }
                 }
             }
         }
