@@ -154,6 +154,76 @@ class NextDNSService {
         req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
         _ = try await URLSession.shared.data(for: req)
     }
+
+    // MARK: - Parental Control
+
+    /// Applies SafeSearch, YouTube Restricted Mode, and blocked services/categories
+    /// to the given NextDNS profile via the Parental Control API.
+    func applyParentalControl(profileID: String,
+                              apiKey: String,
+                              safeSearch: Bool,
+                              youtubeRestricted: Bool,
+                              blockedServices: [String],
+                              blockedCategories: [String]) async {
+        guard !profileID.isEmpty, !apiKey.isEmpty else { return }
+
+        // 1. SafeSearch + YouTube via PATCH on parentalControl
+        let body: [String: Any] = ["safeSearch": safeSearch, "youtubeRestrictedMode": youtubeRestricted]
+        if let data = try? JSONSerialization.data(withJSONObject: body),
+           let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "PATCH"
+            req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = data
+            _ = try? await URLSession.shared.data(for: req)
+        }
+
+        // 2. Sync blocked services
+        await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "services",
+                         activeIDs: Set(blockedServices),
+                         knownIDs: Set(PCItem.knownServices.map { $0.id }))
+
+        // 3. Sync blocked categories
+        await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "categories",
+                         activeIDs: Set(blockedCategories),
+                         knownIDs: Set(PCItem.knownCategories.map { $0.id }))
+    }
+
+    private func syncPCList(profileID: String, apiKey: String, listPath: String,
+                            activeIDs: Set<String>, knownIDs: Set<String>) async {
+        guard let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") else { return }
+        var getReq = URLRequest(url: url)
+        getReq.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+        guard let (data, _) = try? await URLSession.shared.data(for: getReq),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json["data"] as? [[String: Any]] else { return }
+
+        let currentlyBlocked = Set(arr.compactMap { dict -> String? in
+            guard dict["active"] as? Bool == true else { return nil }
+            return dict["id"] as? String
+        })
+
+        // Add what should be blocked but isn't
+        for id in activeIDs where !currentlyBlocked.contains(id) {
+            if let addURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)/\(id)") {
+                var req = URLRequest(url: addURL); req.httpMethod = "POST"
+                req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = "{\"active\":true}".data(using: .utf8)
+                _ = try? await URLSession.shared.data(for: req)
+            }
+        }
+
+        // Remove what's blocked but shouldn't be (only items we manage)
+        for id in currentlyBlocked where knownIDs.contains(id) && !activeIDs.contains(id) {
+            if let delURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)/\(id)") {
+                var req = URLRequest(url: delURL); req.httpMethod = "DELETE"
+                req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+                _ = try? await URLSession.shared.data(for: req)
+            }
+        }
+    }
 }
 
 // MARK: - Models
@@ -180,4 +250,30 @@ struct DNSLogEntry: Identifiable {
 struct DNSListEntry: Identifiable {
     let id: String  // domain
     let active: Bool
+}
+
+struct PCItem: Identifiable {
+    let id: String      // NextDNS API ID
+    let label: String
+    let icon: String    // SF Symbol name
+
+    static let knownServices: [PCItem] = [
+        PCItem(id: "tiktok",     label: "TikTok",          icon: "music.note"),
+        PCItem(id: "instagram",  label: "Instagram",        icon: "camera"),
+        PCItem(id: "snapchat",   label: "Snapchat",         icon: "camera.viewfinder"),
+        PCItem(id: "facebook",   label: "Facebook",         icon: "person.2"),
+        PCItem(id: "discord",    label: "Discord",          icon: "gamecontroller"),
+        PCItem(id: "whatsapp",   label: "WhatsApp",         icon: "bubble.left"),
+        PCItem(id: "twitch",     label: "Twitch",           icon: "tv"),
+        PCItem(id: "youtube",    label: "YouTube",          icon: "play.rectangle"),
+    ]
+
+    static let knownCategories: [PCItem] = [
+        PCItem(id: "porn",            label: "Adult Content",   icon: "exclamationmark.shield"),
+        PCItem(id: "gambling",        label: "Gambling",        icon: "dollarsign.circle"),
+        PCItem(id: "dating",          label: "Dating",          icon: "heart"),
+        PCItem(id: "piracy",          label: "Piracy",          icon: "lock.slash"),
+        PCItem(id: "social-networks", label: "Social Networks", icon: "network"),
+        PCItem(id: "video-streaming", label: "Video Streaming", icon: "play.circle"),
+    ]
 }

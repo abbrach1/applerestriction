@@ -30,6 +30,10 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var nextDNSApiKey: String = ""          // NextDNS API key (admin only)
     var dnsAlertOnRemoval: Bool = true      // notify admin if child removes DNS profile
     var dnsAutoReapply: Bool = true         // automatically re-install DNS profile if removed
+    var safeSearchEnabled: Bool = false     // force SafeSearch on Google + Bing via NextDNS
+    var youtubeRestrictedEnabled: Bool = false  // YouTube Restricted Mode via NextDNS
+    var blockedDNSServices: [String] = []   // NextDNS service IDs to block, e.g. ["tiktok"]
+    var blockedDNSCategories: [String] = [] // NextDNS category IDs to block, e.g. ["porn"]
     var browserEnabled: Bool = true         // show/hide the B-SAFE Browser tab for child
 }
 
@@ -56,9 +60,13 @@ extension ScreenTimeConfiguration {
         forceDNS               = try c.decodeIfPresent(Bool.self,   forKey: .forceDNS)               ?? false
         nextDNSProfileID       = try c.decodeIfPresent(String.self, forKey: .nextDNSProfileID)       ?? ""
         nextDNSApiKey          = try c.decodeIfPresent(String.self, forKey: .nextDNSApiKey)          ?? ""
-        dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? true
-        dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? true
-        browserEnabled         = try c.decodeIfPresent(Bool.self,   forKey: .browserEnabled)         ?? true
+        dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,     forKey: .dnsAlertOnRemoval)      ?? true
+        dnsAutoReapply         = try c.decodeIfPresent(Bool.self,     forKey: .dnsAutoReapply)         ?? true
+        safeSearchEnabled      = try c.decodeIfPresent(Bool.self,     forKey: .safeSearchEnabled)      ?? false
+        youtubeRestrictedEnabled = try c.decodeIfPresent(Bool.self,   forKey: .youtubeRestrictedEnabled) ?? false
+        blockedDNSServices     = try c.decodeIfPresent([String].self, forKey: .blockedDNSServices)     ?? []
+        blockedDNSCategories   = try c.decodeIfPresent([String].self, forKey: .blockedDNSCategories)   ?? []
+        browserEnabled         = try c.decodeIfPresent(Bool.self,     forKey: .browserEnabled)         ?? true
     }
 }
 

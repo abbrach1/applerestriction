@@ -423,6 +423,8 @@ struct AdminDashboardView: View {
     @State private var showFCMSettings = false
     @State private var fcmServerKey = ""
     @State private var fcmSaved = false
+    @State private var nextDNSApiKey = ""
+    @State private var nextDNSSaved = false
 
     private var onlineCount: Int { vm.users.filter(\.isOnline).count }
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
@@ -578,13 +580,49 @@ struct AdminDashboardView: View {
                             .disabled(fcmServerKey.isEmpty)
                         }
 
+                        Section {
+                            SecureField("NextDNS API Key", text: $nextDNSApiKey)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        } header: {
+                            Text("NextDNS API Key")
+                        } footer: {
+                            Text("Get this from nextdns.io → Account → API. Entered once and applies to all child profiles.")
+                                .font(.caption)
+                        }
+
+                        Section {
+                            Button {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await saveNextDNSApiKey(token: token)
+                                    nextDNSSaved = true
+                                    _ = try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    nextDNSSaved = false
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: nextDNSSaved ? "checkmark.circle.fill" : "icloud.and.arrow.up")
+                                    Text(nextDNSSaved ? "Saved!" : "Save API Keys")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(nextDNSSaved ? Color.green : Color(red: 0, green: 0.4, blue: 0.15))
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .disabled(fcmServerKey.isEmpty && nextDNSApiKey.isEmpty)
+                        }
+
                         Section("About FCM Token") {
                             Text("Your device's FCM token is automatically registered when you open the admin dashboard. No extra steps needed — just enter the server key above.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .navigationTitle("Notification Settings")
+                    .navigationTitle("API Keys & Notifications")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
@@ -594,9 +632,12 @@ struct AdminDashboardView: View {
                 }
             }
             .task {
-                // Load server key from UserDefaults first (instant, no network)
+                // Load keys from UserDefaults first (instant, no network)
                 if let local = UserDefaults.standard.string(forKey: "bsafe.fcmServerKey"), !local.isEmpty {
                     fcmServerKey = local
+                }
+                if let local = UserDefaults.standard.string(forKey: "bsafe.nextDNSApiKey"), !local.isEmpty {
+                    nextDNSApiKey = local
                 }
                 let token = await auth.freshToken() ?? ""
                 await vm.loadUsers(idToken: token)
@@ -608,6 +649,39 @@ struct AdminDashboardView: View {
                     fcmServerKey = key
                     UserDefaults.standard.set(key, forKey: "bsafe.fcmServerKey")
                 }
+                if let url = URL(string: "\(dbURL)/adminConfig/nextDNSApiKey.json?auth=\(token)"),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let key = try? JSONDecoder().decode(String.self, from: data),
+                   !key.isEmpty {
+                    nextDNSApiKey = key
+                    UserDefaults.standard.set(key, forKey: "bsafe.nextDNSApiKey")
+                }
+            }
+        }
+    }
+
+    private func saveNextDNSApiKey(token: String) async {
+        let trimmed = nextDNSApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            UserDefaults.standard.set(trimmed, forKey: "bsafe.nextDNSApiKey")
+            if let url = URL(string: "\(dbURL)/adminConfig/nextDNSApiKey.json?auth=\(token)") {
+                var req = URLRequest(url: url)
+                req.httpMethod = "PUT"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = "\"\(trimmed)\"".data(using: .utf8)
+                _ = try? await URLSession.shared.data(for: req)
+            }
+        }
+        // Also save FCM key if set
+        let fcmTrimmed = fcmServerKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fcmTrimmed.isEmpty {
+            UserDefaults.standard.set(fcmTrimmed, forKey: "bsafe.fcmServerKey")
+            if let url = URL(string: "\(dbURL)/adminConfig/fcmServerKey.json?auth=\(token)") {
+                var req = URLRequest(url: url)
+                req.httpMethod = "PUT"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = "\"\(fcmTrimmed)\"".data(using: .utf8)
+                _ = try? await URLSession.shared.data(for: req)
             }
         }
     }
@@ -759,11 +833,11 @@ struct AdminUserControlView: View {
             } else {
                 TabView(selection: $selectedTab) {
                     RequestsTab(vm: vm, user: user).tag(0)
-                    WebsiteTab(vm: vm, user: user).tag(1)
+                    WebsiteTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(1)
                     DowntimeTab(vm: vm, user: user).tag(2)
                     AppsTab(vm: vm, user: user).tag(3)
                     CommandsTab(vm: vm, user: user).tag(4)
-                    DNSTab(vm: vm, user: user).tag(5)
+                    DNSTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(5)
                     InfoTab(user: user).tag(6)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -1024,6 +1098,7 @@ struct InfoTab: View {
 struct WebsiteTab: View {
     @ObservedObject var vm: AdminUserViewModel
     let user: ManagedUser
+    let globalApiKey: String
     @EnvironmentObject var auth: FirebaseAuthService
     @State private var newDomain = ""
     @State private var newPendingDomain = ""
@@ -1102,11 +1177,6 @@ struct WebsiteTab: View {
                     HStack {
                         Image(systemName: "person.badge.key.fill").foregroundStyle(.purple).frame(width: 28)
                         TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
-                    }
-                    HStack {
-                        Image(systemName: "key.fill").foregroundStyle(.purple).frame(width: 28)
-                        SecureField("NextDNS API Key", text: $vm.config.nextDNSApiKey)
                             .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
                     }
                     Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
@@ -1284,10 +1354,11 @@ struct WebsiteTab: View {
                         let token = await auth.freshToken() ?? ""
                         await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
                         // Sync to NextDNS if configured
-                        if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !vm.config.nextDNSApiKey.isEmpty {
+                        let effectiveKey = globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
+                        if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !effectiveKey.isEmpty {
                             let result = await NextDNSService.shared.sync(
                                 profileID: vm.config.nextDNSProfileID,
-                                apiKey: vm.config.nextDNSApiKey,
+                                apiKey: effectiveKey,
                                 allowedDomains: vm.config.allowedWebsites,
                                 blockedDomains: vm.config.blockedWebsites,
                                 whitelistMode: vm.config.websiteFilterMode == .whitelist
@@ -1299,8 +1370,9 @@ struct WebsiteTab: View {
                     }
                 }
 
-                if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !vm.config.nextDNSApiKey.isEmpty {
-                    NextDNSSyncStatusRow(vm: vm)
+                let effectiveKey = globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
+                if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !effectiveKey.isEmpty {
+                    NextDNSSyncStatusRow(vm: vm, globalApiKey: effectiveKey)
                 }
             }
         }
@@ -2079,20 +2151,23 @@ struct CommandsTab: View {
 struct DNSTab: View {
     @ObservedObject var vm: AdminUserViewModel
     let user: ManagedUser
+    let globalApiKey: String
     @EnvironmentObject var auth: FirebaseAuthService
 
-    @State private var selectedSection = 0  // 0=Logs, 1=Allow, 2=Block
+    @State private var selectedSection = 0  // 0=Logs, 1=Allow, 2=Block, 3=Safety
     @State private var logs: [DNSLogEntry] = []
     @State private var allowList: [DNSListEntry] = []
     @State private var blockList: [DNSListEntry] = []
     @State private var isLoading = false
     @State private var newAllowDomain = ""
     @State private var newBlockDomain = ""
-    @State private var logFilter = ""       // filter logs by domain
+    @State private var logFilter = ""
+    @State private var isSavingSafety = false
+    @State private var safetySaved = false
 
     private var profileID: String { vm.config.nextDNSProfileID }
-    private var apiKey: String { vm.config.nextDNSApiKey }
-    private var isConfigured: Bool { !profileID.isEmpty && !apiKey.isEmpty }
+    private var effectiveApiKey: String { globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey }
+    private var isConfigured: Bool { !profileID.isEmpty && !effectiveApiKey.isEmpty }
 
     var body: some View {
         if !isConfigured {
@@ -2113,27 +2188,31 @@ struct DNSTab: View {
             .padding()
         } else {
             VStack(spacing: 0) {
-                // Segmented: Logs | Allow | Block
+                // Segmented: Logs | Allow | Block | Safety
                 Picker("DNS Section", selection: $selectedSection) {
                     Text("Logs").tag(0)
                     Text("Allow").tag(1)
                     Text("Block").tag(2)
+                    Text("Safety").tag(3)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal).padding(.vertical, 10)
 
-                if isLoading {
+                if isLoading && selectedSection != 3 {
                     Spacer(); ProgressView("Loading…"); Spacer()
                 } else {
                     switch selectedSection {
                     case 0: logsView
                     case 1: listView(entries: allowList, endpoint: "allowlist", newDomain: $newAllowDomain, color: .green, label: "Allowed")
+                    case 3: safetyView
                     default: listView(entries: blockList, endpoint: "denylist",  newDomain: $newBlockDomain, color: .red,   label: "Blocked")
                     }
                 }
             }
             .task { await reload() }
-            .onChange(of: selectedSection) { _, _ in Task { await reload() } }
+            .onChange(of: selectedSection) { _, _ in
+                if selectedSection != 3 { Task { await reload() } }
+            }
         }
     }
 
@@ -2194,10 +2273,10 @@ struct DNSTab: View {
                         // Long-press to add to allow/block
                         .contextMenu {
                             Button {
-                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "allowlist", profileID: profileID, apiKey: apiKey) }
+                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "allowlist", profileID: profileID, apiKey: effectiveApiKey) }
                             } label: { Label("Add to Allow List", systemImage: "checkmark.circle") }
                             Button(role: .destructive) {
-                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "denylist", profileID: profileID, apiKey: apiKey) }
+                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "denylist", profileID: profileID, apiKey: effectiveApiKey) }
                             } label: { Label("Add to Block List", systemImage: "xmark.circle") }
                         }
                     }
@@ -2228,7 +2307,7 @@ struct DNSTab: View {
                         guard !d.isEmpty else { return }
                         newDomain.wrappedValue = ""
                         Task {
-                            try? await NextDNSService.shared.addDomain(d, to: endpoint, profileID: profileID, apiKey: apiKey)
+                            try? await NextDNSService.shared.addDomain(d, to: endpoint, profileID: profileID, apiKey: effectiveApiKey)
                             await reload()
                         }
                     }
@@ -2256,7 +2335,7 @@ struct DNSTab: View {
                         let toDelete = indices.map { entries[$0].id }
                         Task {
                             for d in toDelete {
-                                try? await NextDNSService.shared.removeDomain(d, from: endpoint, profileID: profileID, apiKey: apiKey)
+                                try? await NextDNSService.shared.removeDomain(d, from: endpoint, profileID: profileID, apiKey: effectiveApiKey)
                             }
                             await reload()
                         }
@@ -2273,20 +2352,162 @@ struct DNSTab: View {
     private func reload() async {
         guard isConfigured else { return }
         isLoading = true
-        async let l = NextDNSService.shared.fetchLogs(profileID: profileID, apiKey: apiKey)
-        async let a = NextDNSService.shared.fetchList("allowlist", profileID: profileID, apiKey: apiKey)
-        async let b = NextDNSService.shared.fetchList("denylist",  profileID: profileID, apiKey: apiKey)
+        async let l = NextDNSService.shared.fetchLogs(profileID: profileID, apiKey: effectiveApiKey)
+        async let a = NextDNSService.shared.fetchList("allowlist", profileID: profileID, apiKey: effectiveApiKey)
+        async let b = NextDNSService.shared.fetchList("denylist",  profileID: profileID, apiKey: effectiveApiKey)
         (logs, allowList, blockList) = await (l, a, b)
         isLoading = false
+    }
+
+    // MARK: - Safety View
+
+    private var safetyView: some View {
+        List {
+            if !vm.config.forceDNS {
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text("Enable \"Force NextDNS\" in the Websites tab → DNS Filter for safety settings to take effect.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                Toggle(isOn: $vm.config.safeSearchEnabled) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Force SafeSearch")
+                            Text("Google, Bing + DuckDuckGo show only filtered results")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "magnifyingglass.circle.fill").foregroundStyle(.blue) }
+                }
+                Toggle(isOn: $vm.config.youtubeRestrictedEnabled) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("YouTube Restricted Mode")
+                            Text("Hides explicit content in YouTube app and Safari")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "play.rectangle.fill").foregroundStyle(.red) }
+                }
+            } header: { Text("Search & Video") }
+
+            Section {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(PCItem.knownServices) { item in
+                        BlockChip(item: item, isBlocked: vm.config.blockedDNSServices.contains(item.id)) {
+                            toggleDNSService(item.id)
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+            } header: { Text("Block Apps") }
+              footer: { Text("Blocks these apps system-wide via DNS — affects all browsers and native apps.") }
+
+            Section {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(PCItem.knownCategories) { item in
+                        BlockChip(item: item, isBlocked: vm.config.blockedDNSCategories.contains(item.id)) {
+                            toggleDNSCategory(item.id)
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+            } header: { Text("Block Categories") }
+              footer: { Text("Blocks entire categories of content via NextDNS — more comprehensive than individual domains.") }
+
+            Section {
+                Button {
+                    Task {
+                        isSavingSafety = true
+                        let token = await auth.freshToken() ?? ""
+                        await vm.save(uid: user.uid, idToken: token)
+                        await NextDNSService.shared.applyParentalControl(
+                            profileID: profileID,
+                            apiKey: effectiveApiKey,
+                            safeSearch: vm.config.safeSearchEnabled,
+                            youtubeRestricted: vm.config.youtubeRestrictedEnabled,
+                            blockedServices: vm.config.blockedDNSServices,
+                            blockedCategories: vm.config.blockedDNSCategories
+                        )
+                        isSavingSafety = false
+                        safetySaved = true
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        safetySaved = false
+                    }
+                } label: {
+                    HStack {
+                        if isSavingSafety { ProgressView().tint(.white) }
+                        else { Image(systemName: safetySaved ? "checkmark.circle.fill" : "network.badge.shield.half.filled") }
+                        Text(safetySaved ? "Applied!" : (isSavingSafety ? "Applying..." : "Apply Safety Settings"))
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(safetySaved ? Color.green : Color(red: 0, green: 0.4, blue: 0.15))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(isSavingSafety || !isConfigured)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            } footer: {
+                Text("Updates your NextDNS profile immediately. All devices using this profile are affected.")
+            }
+        }
+    }
+
+    private func toggleDNSService(_ id: String) {
+        if vm.config.blockedDNSServices.contains(id) {
+            vm.config.blockedDNSServices.removeAll { $0 == id }
+        } else {
+            vm.config.blockedDNSServices.append(id)
+        }
+    }
+
+    private func toggleDNSCategory(_ id: String) {
+        if vm.config.blockedDNSCategories.contains(id) {
+            vm.config.blockedDNSCategories.removeAll { $0 == id }
+        } else {
+            vm.config.blockedDNSCategories.append(id)
+        }
     }
 }
 
 // MARK: - Shared Components
 
+// MARK: - Block Chip (used in DNSTab Safety view)
+
+struct BlockChip: View {
+    let item: PCItem
+    let isBlocked: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                Image(systemName: item.icon).font(.caption2)
+                Text(item.label).font(.caption).fontWeight(.medium).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(isBlocked ? Color.red.opacity(0.12) : Color(.systemGray6),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(isBlocked ? Color.red.opacity(0.3) : Color.clear, lineWidth: 1))
+            .foregroundStyle(isBlocked ? .red : .primary)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - NextDNS Sync Status Row
 
 struct NextDNSSyncStatusRow: View {
     @ObservedObject var vm: AdminUserViewModel
+    var globalApiKey: String = ""
     @State private var profileName: String? = nil
     @State private var isChecking = false
 
@@ -2312,7 +2533,7 @@ struct NextDNSSyncStatusRow: View {
             isChecking = true
             profileName = await NextDNSService.shared.fetchProfileName(
                 profileID: vm.config.nextDNSProfileID,
-                apiKey: vm.config.nextDNSApiKey
+                apiKey: globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
             )
             isChecking = false
         }
