@@ -2241,7 +2241,7 @@ struct DNSTab: View {
             if filtered.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "clock.arrow.2.circlepath").font(.system(size: 36)).foregroundStyle(.secondary)
-                    Text(logs.isEmpty ? "No logs yet" : "No matches for "\(logFilter)"")
+                    Text(logs.isEmpty ? "No logs yet" : "No matches for \"\(logFilter)\"")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
