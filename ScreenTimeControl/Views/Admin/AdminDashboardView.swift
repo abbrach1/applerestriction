@@ -61,6 +61,8 @@ class AdminUserViewModel: ObservableObject {
     @Published var unlockRequests: [(pushKey: String, request: UnlockRequest)] = []
     @Published var websiteRequests: [(pushKey: String, request: WebsiteRequest)] = []
 
+    var pendingRequestCount: Int { unlockRequests.count + websiteRequests.count }
+
     struct WebsiteSetupInfo {
         let siteCount: Int
         let categoryCount: Int
@@ -395,6 +397,14 @@ struct AdminDashboardView: View {
     private var onlineCount: Int { vm.users.filter(\.isOnline).count }
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
+    private func userInitials(_ name: String) -> String {
+        name.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .prefix(2)
+            .compactMap { $0.first.map { String($0).uppercased() } }
+            .joined()
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -414,28 +424,45 @@ struct AdminDashboardView: View {
                                     .environmentObject(auth)
                             } label: {
                                 HStack(spacing: 12) {
-                                    Circle()
-                                        .fill(user.isOnline ? Color.green : Color.gray.opacity(0.4))
-                                        .frame(width: 10, height: 10)
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    // Initials avatar
+                                    ZStack {
+                                        Circle()
+                                            .fill(user.isOnline
+                                                  ? Color(red: 0, green: 0.4, blue: 0.15).opacity(0.12)
+                                                  : Color(.systemGray5))
+                                            .frame(width: 44, height: 44)
+                                        Text(userInitials(user.primaryLabel))
+                                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                            .foregroundStyle(user.isOnline
+                                                             ? Color(red: 0, green: 0.4, blue: 0.15)
+                                                             : .secondary)
+                                    }
+                                    .overlay(alignment: .bottomTrailing) {
+                                        Circle()
+                                            .fill(user.isOnline ? .green : Color(.systemGray4))
+                                            .frame(width: 11, height: 11)
+                                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 3) {
                                         Text(user.primaryLabel)
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text(user.secondaryLabel)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(.subheadline).fontWeight(.semibold)
+                                        Text(user.deviceName.isEmpty ? user.secondaryLabel : user.deviceName)
+                                            .font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     if user.isOnline {
                                         Text("Online")
-                                            .font(.caption2)
+                                            .font(.caption2).fontWeight(.medium)
                                             .foregroundStyle(.green)
+                                            .padding(.horizontal, 8).padding(.vertical, 3)
+                                            .background(Color.green.opacity(0.1), in: Capsule())
                                     } else if !user.lastSeen.isEmpty {
                                         Text(relativeLastSeen(user.lastSeen))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                            .font(.caption2).foregroundStyle(.secondary)
                                     }
                                 }
+                                .padding(.vertical, 4)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
@@ -453,37 +480,33 @@ struct AdminDashboardView: View {
                     }
                 }
             }
-            .navigationTitle("Managed Devices")
+            .navigationTitle("B-SAFE Admin")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         if onlineCount > 0 {
-                            Label("\(onlineCount) online", systemImage: "circle.fill")
-                                .labelStyle(.titleAndIcon)
-                                .font(.caption)
-                                .foregroundStyle(.green)
+                            HStack(spacing: 4) {
+                                Circle().fill(.green).frame(width: 7, height: 7)
+                                Text("\(onlineCount) online")
+                                    .font(.caption).fontWeight(.medium).foregroundStyle(.green)
+                            }
                         }
                         Button {
                             Task {
                                 let token = await auth.freshToken() ?? ""
                                 await vm.loadUsers(idToken: token)
                             }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
+                        } label: { Image(systemName: "arrow.clockwise") }
                     }
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
                         Button("Sign Out", role: .destructive) { auth.signOut() }
-                        Button {
-                            showFCMSettings = true
-                        } label: {
+                        Button { showFCMSettings = true } label: {
                             Label("Notification Settings", systemImage: "bell.badge")
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
+                    } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
             .sheet(isPresented: $showFCMSettings) {
@@ -650,19 +673,20 @@ struct AdminUserControlView: View {
                 .background(Color.orange)
             }
 
-            // Scrollable tab picker (5 tabs)
+            // Scrollable tab picker (7 tabs)
+            let tabs: [(Int, String, String)] = [
+                (0, "bell.badge.fill",                  "Requests"),
+                (1, "globe",                            "Websites"),
+                (2, "moon.fill",                        "Downtime"),
+                (3, "square.grid.2x2.fill",             "Apps"),
+                (4, "bolt.fill",                        "Commands"),
+                (5, "network.badge.shield.half.filled", "DNS"),
+                (6, "info.circle.fill",                 "Info"),
+            ]
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach([
-                        (0, "globe",                    "Websites"),
-                        (1, "moon.fill",                "Downtime"),
-                        (2, "square.grid.2x2.fill",     "Apps"),
-                        (3, "bolt.fill",                "Commands"),
-                        (4, "network.badge.shield.half.filled", "DNS"),
-                    ], id: \.0) { tag, icon, label in
-                        Button {
-                            selectedTab = tag
-                        } label: {
+                    ForEach(tabs, id: \.0) { tag, icon, label in
+                        Button { selectedTab = tag } label: {
                             VStack(spacing: 3) {
                                 Image(systemName: icon)
                                     .font(.system(size: 14, weight: .medium))
@@ -675,9 +699,21 @@ struct AdminUserControlView: View {
                             .overlay(
                                 Rectangle()
                                     .frame(height: 2)
-                                    .foregroundStyle(selectedTab == tag ? Color(red: 0, green: 0.4, blue: 0.15) : .clear),
+                                    .foregroundStyle(selectedTab == tag
+                                                     ? Color(red: 0, green: 0.4, blue: 0.15)
+                                                     : .clear),
                                 alignment: .bottom
                             )
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if tag == 0 && vm.pendingRequestCount > 0 {
+                                Text("\(vm.pendingRequestCount)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4).padding(.vertical, 2)
+                                    .background(.red, in: Capsule())
+                                    .offset(x: 2, y: 2)
+                            }
                         }
                     }
                 }
@@ -692,11 +728,13 @@ struct AdminUserControlView: View {
                 Spacer()
             } else {
                 TabView(selection: $selectedTab) {
-                    WebsiteTab(vm: vm, user: user).tag(0)
-                    DowntimeTab(vm: vm, user: user).tag(1)
-                    AppsTab(vm: vm, user: user).tag(2)
-                    CommandsTab(vm: vm, user: user).tag(3)
-                    DNSTab(vm: vm, user: user).tag(4)
+                    RequestsTab(vm: vm, user: user).tag(0)
+                    WebsiteTab(vm: vm, user: user).tag(1)
+                    DowntimeTab(vm: vm, user: user).tag(2)
+                    AppsTab(vm: vm, user: user).tag(3)
+                    CommandsTab(vm: vm, user: user).tag(4)
+                    DNSTab(vm: vm, user: user).tag(5)
+                    InfoTab(user: user).tag(6)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
@@ -707,6 +745,247 @@ struct AdminUserControlView: View {
             let token = await auth.freshToken() ?? ""
             await vm.load(uid: user.uid, idToken: token)
         }
+    }
+}
+
+// MARK: - Requests Tab
+
+struct RequestsTab: View {
+    @ObservedObject var vm: AdminUserViewModel
+    let user: ManagedUser
+    @EnvironmentObject var auth: FirebaseAuthService
+
+    var body: some View {
+        if vm.unlockRequests.isEmpty && vm.websiteRequests.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 52)).foregroundStyle(.green)
+                Text("No Pending Requests")
+                    .font(.headline)
+                Text("Unlock and website access requests from this device appear here.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 32)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                if !vm.unlockRequests.isEmpty {
+                    Section {
+                        ForEach(vm.unlockRequests, id: \.pushKey) { item in
+                            requestCard(
+                                icon: "lock.open.fill", iconColor: .orange,
+                                title: item.request.deviceName.isEmpty ? "Unknown Device" : item.request.deviceName,
+                                subtitle: item.request.timestamp.formatted(.relative(presentation: .named)),
+                                reason: item.request.reason
+                            ) {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await vm.approveUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                }
+                            } onDeny: {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await vm.denyUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                }
+                            }
+                        }
+                    } header: { Label("Unlock Requests", systemImage: "lock.open.fill") }
+                      footer: { Text("Approve sends an unlock command. Device responds within 30 seconds.") }
+                }
+
+                if !vm.websiteRequests.isEmpty {
+                    Section {
+                        ForEach(vm.websiteRequests, id: \.pushKey) { item in
+                            requestCard(
+                                icon: "globe.badge.exclamationmark", iconColor: .blue,
+                                title: item.request.domain,
+                                subtitle: "\(item.request.deviceName.isEmpty ? "Unknown" : item.request.deviceName) · \(item.request.timestamp.formatted(.relative(presentation: .named)))",
+                                reason: item.request.reason
+                            ) {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await vm.approveWebsiteRequest(
+                                        pushKey: item.pushKey,
+                                        domain: item.request.domain,
+                                        uid: user.uid, idToken: token)
+                                }
+                            } onDeny: {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await vm.denyWebsiteRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
+                                }
+                            }
+                        }
+                    } header: { Label("Website Requests", systemImage: "globe.badge.exclamationmark") }
+                      footer: { Text("Approve adds the site to their whitelist and enables whitelist mode.") }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func requestCard(icon: String, iconColor: Color, title: String, subtitle: String,
+                             reason: String, onApprove: @escaping () -> Void, onDeny: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(iconColor.opacity(0.12)).frame(width: 36, height: 36)
+                    Image(systemName: icon).foregroundStyle(iconColor).font(.system(size: 15, weight: .semibold))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline).fontWeight(.semibold)
+                    Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if !reason.isEmpty {
+                Text("\"\(reason)\"")
+                    .font(.caption).foregroundStyle(.secondary).italic()
+                    .padding(.leading, 46)
+            }
+            HStack(spacing: 10) {
+                Button(action: onApprove) {
+                    Text("Approve").font(.subheadline).fontWeight(.semibold)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .background(.green).foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                Button(action: onDeny) {
+                    Text("Deny").font(.subheadline).fontWeight(.semibold)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .background(Color.red.opacity(0.12)).foregroundStyle(.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .padding(.top, 2)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Info Tab
+
+struct InfoTab: View {
+    let user: ManagedUser
+    @EnvironmentObject var auth: FirebaseAuthService
+    @State private var info: [String: Any] = [:]
+    @State private var isLoading = true
+    private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading device info...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section("Device") {
+                        infoRow("Name",       value: info["deviceName"] as? String ?? user.deviceName,          icon: "iphone",           color: .blue)
+                        infoRow("Model",      value: info["deviceModel"] as? String ?? "—",                     icon: "cpu.fill",          color: .purple)
+                        infoRow("iOS",        value: (info["systemVersion"] as? String).map { "iOS \($0)" } ?? "—", icon: "applelogo",    color: .primary)
+                        infoRow("Device ID",  value: (info["deviceId"] as? String).map { String($0.prefix(14)) + "…" } ?? "—", icon: "barcode", color: .secondary)
+                    }
+
+                    Section("Power & Storage") {
+                        let batteryLevel = info["batteryLevel"] as? Double ?? -1
+                        let batteryState = info["batteryState"] as? String ?? "unknown"
+                        if batteryLevel >= 0 {
+                            HStack {
+                                Image(systemName: batteryIcon(state: batteryState, level: batteryLevel))
+                                    .foregroundStyle(batteryColor(level: batteryLevel)).frame(width: 28)
+                                Text("Battery")
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("\(Int(batteryLevel * 100))%")
+                                        .fontWeight(.semibold).foregroundStyle(batteryColor(level: batteryLevel))
+                                    if batteryState == "charging" {
+                                        Label("Charging", systemImage: "bolt.fill").font(.caption2).foregroundStyle(.green)
+                                    }
+                                }
+                            }
+                            ProgressView(value: batteryLevel)
+                                .tint(batteryColor(level: batteryLevel))
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                        }
+
+                        let storageTotal = info["storageTotal"] as? Int64 ?? 0
+                        let storageFree  = info["storageFree"]  as? Int64 ?? 0
+                        if storageTotal > 0 {
+                            let used     = storageTotal - storageFree
+                            let usedGB   = Double(used) / 1_000_000_000
+                            let totalGB  = Double(storageTotal) / 1_000_000_000
+                            let fraction = Double(used) / Double(storageTotal)
+                            HStack {
+                                Image(systemName: "internaldrive.fill").foregroundStyle(.orange).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("Storage")
+                                        Spacer()
+                                        Text(String(format: "%.1f / %.0f GB", usedGB, totalGB))
+                                            .font(.subheadline).fontWeight(.medium)
+                                    }
+                                    ProgressView(value: fraction)
+                                        .tint(fraction > 0.9 ? .red : fraction > 0.75 ? .orange : .blue)
+                                }
+                            }
+                        }
+                    }
+
+                    Section("Connectivity") {
+                        HStack {
+                            Circle().fill(user.isOnline ? .green : Color(.systemGray4)).frame(width: 8, height: 8)
+                            Text(user.isOnline ? "Online" : "Offline")
+                                .foregroundStyle(user.isOnline ? .green : .secondary)
+                            Spacer()
+                            if !user.lastSeen.isEmpty {
+                                Text(relativeLastSeen(user.lastSeen))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Section("Account") {
+                        infoRow("Email",   value: user.email,                                            icon: "envelope.fill",         color: .blue)
+                        infoRow("User ID", value: String(user.uid.prefix(14)) + "…",                    icon: "person.badge.key.fill",  color: .secondary)
+                    }
+                }
+            }
+        }
+        .task { await loadInfo() }
+    }
+
+    @ViewBuilder
+    private func infoRow(_ label: String, value: String, icon: String, color: Color) -> some View {
+        HStack {
+            Image(systemName: icon).foregroundStyle(color).frame(width: 28)
+            Text(label)
+            Spacer()
+            Text(value).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    private func batteryIcon(state: String, level: Double) -> String {
+        if state == "charging" || state == "full" { return "battery.100.bolt" }
+        if level > 0.75 { return "battery.100" }
+        if level > 0.50 { return "battery.75" }
+        if level > 0.25 { return "battery.50" }
+        return "battery.25"
+    }
+
+    private func batteryColor(level: Double) -> Color {
+        level > 0.5 ? .green : level > 0.2 ? .yellow : .red
+    }
+
+    private func loadInfo() async {
+        isLoading = true
+        let token = await auth.freshToken() ?? ""
+        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/info.json?auth=\(token)"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            isLoading = false; return
+        }
+        info = dict
+        isLoading = false
     }
 }
 
@@ -724,72 +1003,6 @@ struct WebsiteTab: View {
 
     var body: some View {
         List {
-            // Pending website access requests from child
-            if !vm.websiteRequests.isEmpty {
-                Section {
-                    ForEach(vm.websiteRequests, id: \.pushKey) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Image(systemName: "globe.badge.exclamationmark")
-                                    .foregroundStyle(.blue)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(item.request.domain)
-                                        .font(.subheadline).fontWeight(.medium)
-                                    Text(item.request.deviceName.isEmpty ? "Unknown device" : item.request.deviceName)
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(item.request.timestamp.formatted(.relative(presentation: .named)))
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            if !item.request.reason.isEmpty {
-                                Text("\"\(item.request.reason)\"")
-                                    .font(.caption).foregroundStyle(.secondary).italic()
-                            }
-                            HStack(spacing: 10) {
-                                Button {
-                                    Task {
-                                        let token = await auth.freshToken() ?? ""
-                                        await vm.approveWebsiteRequest(
-                                            pushKey: item.pushKey,
-                                            domain: item.request.domain,
-                                            uid: user.uid, idToken: token
-                                        )
-                                    }
-                                } label: {
-                                    Text("Approve")
-                                        .font(.caption).fontWeight(.semibold)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(Color.green)
-                                        .foregroundStyle(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                }
-                                Button {
-                                    Task {
-                                        let token = await auth.freshToken() ?? ""
-                                        await vm.denyWebsiteRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
-                                    }
-                                } label: {
-                                    Text("Deny")
-                                        .font(.caption).fontWeight(.semibold)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(Color.red.opacity(0.12))
-                                        .foregroundStyle(.red)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                } header: {
-                    Label("Website Access Requests", systemImage: "globe.badge.exclamationmark")
-                } footer: {
-                    Text("Approve adds the site to their whitelist and saves immediately.")
-                }
-            }
-
             // Child device setup status
             if let info = vm.websiteSetupInfo {
                 Section {
@@ -1716,65 +1929,6 @@ struct CommandsTab: View {
 
     var body: some View {
         List {
-            // Unlock Requests
-            if !vm.unlockRequests.isEmpty {
-                Section {
-                    ForEach(vm.unlockRequests, id: \.pushKey) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Image(systemName: "lock.open.fill")
-                                    .foregroundStyle(.orange)
-                                Text(item.request.deviceName.isEmpty ? "Unknown device" : item.request.deviceName)
-                                    .font(.subheadline).fontWeight(.medium)
-                                Spacer()
-                                Text(item.request.timestamp.formatted(.relative(presentation: .named)))
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            if !item.request.reason.isEmpty {
-                                Text("\"\(item.request.reason)\"")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .italic()
-                            }
-                            HStack(spacing: 10) {
-                                Button {
-                                    Task {
-                                        let token = await auth.freshToken() ?? ""
-                                        await vm.approveUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
-                                    }
-                                } label: {
-                                    Text("Approve")
-                                        .font(.caption).fontWeight(.semibold)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(Color.green)
-                                        .foregroundStyle(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                }
-                                Button {
-                                    Task {
-                                        let token = await auth.freshToken() ?? ""
-                                        await vm.denyUnlockRequest(pushKey: item.pushKey, uid: user.uid, idToken: token)
-                                    }
-                                } label: {
-                                    Text("Deny")
-                                        .font(.caption).fontWeight(.semibold)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(Color.red.opacity(0.15))
-                                        .foregroundStyle(.red)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                } header: {
-                    Label("Unlock Requests", systemImage: "lock.open.fill")
-                } footer: {
-                    Text("Approve to send an unlock command. The device unlocks within 30 seconds.")
-                }
-            }
-
             // Send Notification
             Section {
                 TextField("Title (optional)", text: $notifTitle)

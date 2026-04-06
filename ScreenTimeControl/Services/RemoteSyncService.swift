@@ -266,15 +266,42 @@ class RemoteSyncService: ObservableObject {
         let savedName = existing?.value as? String ?? ""
         if !savedName.isEmpty { displayName = savedName }
 
-        let info: [String: Any] = [
-            "email": email,
-            "displayName": savedName,
-            "deviceName": DeviceInfo.current.name,
-            "deviceModel": DeviceInfo.current.model,
-            "deviceId": DeviceInfo.current.id,
-            "isOnline": true,
-            "lastSeen": ISO8601DateFormatter().string(from: Date())
+        // Battery
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let batteryLevel = UIDevice.current.batteryLevel
+        let batteryStateStr: String
+        switch UIDevice.current.batteryState {
+        case .charging:  batteryStateStr = "charging"
+        case .full:      batteryStateStr = "full"
+        case .unplugged: batteryStateStr = "unplugged"
+        default:         batteryStateStr = "unknown"
+        }
+
+        // Storage
+        var storageTotal: Int64 = 0
+        var storageFree:  Int64 = 0
+        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()) {
+            storageTotal = attrs[.systemSize]     as? Int64 ?? 0
+            storageFree  = attrs[.systemFreeSize] as? Int64 ?? 0
+        }
+
+        var info: [String: Any] = [
+            "email":         email,
+            "displayName":   savedName,
+            "deviceName":    DeviceInfo.current.name,
+            "deviceModel":   DeviceInfo.current.model,
+            "deviceId":      DeviceInfo.current.id,
+            "systemVersion": UIDevice.current.systemVersion,
+            "isOnline":      true,
+            "lastSeen":      ISO8601DateFormatter().string(from: Date()),
+            "storageTotal":  storageTotal,
+            "storageFree":   storageFree,
         ]
+        if batteryLevel >= 0 {
+            info["batteryLevel"] = Double(batteryLevel)
+            info["batteryState"] = batteryStateStr
+        }
+
         _ = try? await dbRef.child("users/\(uid)/info").setValue(info)
         isPaired = true
     }
