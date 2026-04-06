@@ -30,6 +30,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var nextDNSApiKey: String = ""          // NextDNS API key (admin only)
     var dnsAlertOnRemoval: Bool = true      // notify admin if child removes DNS profile
     var dnsAutoReapply: Bool = true         // automatically re-install DNS profile if removed
+    var browserEnabled: Bool = true         // show/hide the B-SAFE Browser tab for child
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -57,6 +58,7 @@ extension ScreenTimeConfiguration {
         nextDNSApiKey          = try c.decodeIfPresent(String.self, forKey: .nextDNSApiKey)          ?? ""
         dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,   forKey: .dnsAlertOnRemoval)      ?? true
         dnsAutoReapply         = try c.decodeIfPresent(Bool.self,   forKey: .dnsAutoReapply)         ?? true
+        browserEnabled         = try c.decodeIfPresent(Bool.self,   forKey: .browserEnabled)         ?? true
     }
 }
 

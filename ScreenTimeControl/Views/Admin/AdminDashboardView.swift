@@ -977,6 +977,24 @@ struct WebsiteTab: View {
             }
 
             Section {
+                Toggle(isOn: $vm.config.browserEnabled) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("B-SAFE Browser")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Show the built-in browser tab on the child's device")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "globe.badge.checkmark").foregroundStyle(.green)
+                    }
+                }
+            } header: { Text("Browser") } footer: {
+                Text("When enabled, the child can browse only the allowed sites using the B-SAFE Browser. Disable to remove the browser tab entirely.")
+                    .font(.caption)
+            }
+
+            Section {
                 Toggle(isOn: $vm.config.contentBlockerEnabled) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {

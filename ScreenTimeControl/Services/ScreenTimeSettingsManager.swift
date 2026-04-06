@@ -173,44 +173,26 @@ class ScreenTimeSettingsManager: ObservableObject {
             }
         } else {
             // Whitelist mode
+            // DO NOT use store.shield.webDomainCategories here — that blocks WKWebView too,
+            // making B-SAFE Browser show "Restricted" even for allowed sites.
+            // Safari is handled by the BSAFEContentBlocker extension (whitelist rules).
+            // B-SAFE Browser is handled by the WKWebView navigation delegate.
+            store.shield.webDomainCategories = nil
             store.shield.webDomains = nil
-
-            // In whitelist mode with remote allowedWebsites: block ALL of Safari/Chrome/etc
-            // via Screen Time. The in-app B-SAFE Browser (WKWebView) is the only way to
-            // browse — it enforces the whitelist in code. No extension to disable, no bypass
-            // since the app itself is protected by the Screen Time PIN.
-            if !configuration.allowedWebsites.isEmpty {
-                store.shield.webDomainCategories = WebPolicy.all()
-                saveConfiguration()
-                return
-            }
-
-            // On-device picker path: use opaque WebDomainTokens if available
-            if let base64 = UserDefaults.standard.string(forKey: "screentime.websiteSelection"),
-               let data = Data(base64Encoded: base64),
-               let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
-                let webTokens = selection.webDomainTokens
-                let catTokens = selection.categoryTokens
-                if !webTokens.isEmpty {
-                    store.shield.webDomainCategories = WebPolicy.all(except: webTokens)
-                } else if !catTokens.isEmpty {
-                    store.shield.webDomainCategories = nil
-                } else {
-                    store.shield.webDomainCategories = WebPolicy.all()
-                }
-            } else {
-                store.shield.webDomainCategories = WebPolicy.all()
-            }
         }
         saveConfiguration()
     }
 
     // MARK: - Installation Block
 
-    /// SKOverlay (used for admin-pushed apps) works without lifting denyAppInstallation,
-    /// so we always respect the admin's blockNewApps setting — no override needed.
     func updateInstallationBlock(hasPendingAdminApps: Bool) {
-        store.application.denyAppInstallation = configuration.blockNewApps
+        // When admin pushes apps, temporarily lift denyAppInstallation so SKOverlay can install.
+        // The App Store app itself stays hidden from home screen via shield.applications if blocked there.
+        if hasPendingAdminApps {
+            store.application.denyAppInstallation = false
+        } else {
+            store.application.denyAppInstallation = configuration.blockNewApps
+        }
     }
 
     // MARK: - Remote Configuration

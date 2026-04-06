@@ -41,9 +41,11 @@ struct ChildDeviceView: View {
             mainTab(config: config)
                 .tabItem { Label("Home", systemImage: "shield.checkered") }
 
-            SafeBrowserView()
-                .environmentObject(settingsManager)
-                .tabItem { Label("Browser", systemImage: "globe") }
+            if config.browserEnabled {
+                SafeBrowserView()
+                    .environmentObject(settingsManager)
+                    .tabItem { Label("Browser", systemImage: "globe") }
+            }
         }
         .tint(Color(red: 0, green: 0.4, blue: 0.15))
     }
@@ -102,6 +104,9 @@ struct ChildDeviceView: View {
                     StatusRow(icon: "globe", label: "Website Filter",
                               value: websiteFilterStatus(config),
                               active: isWebsiteFilterActive(config), color: .blue)
+                    StatusRow(icon: "network.badge.shield.half.filled", label: "DNS Filter",
+                              value: config.forceDNS ? (config.nextDNSProfileID.isEmpty ? "On" : "Profile: \(config.nextDNSProfileID)") : "Off",
+                              active: config.forceDNS, color: .purple)
                     StatusRow(icon: "square.grid.2x2.fill", label: "App Blocking",
                               value: appBlockingStatus(config),
                               active: isAppBlockingActive(config), color: .orange)
@@ -532,8 +537,12 @@ struct ChildDeviceView: View {
 
     private func websiteFilterStatus(_ config: ScreenTimeConfiguration) -> String {
         if config.websiteFilterMode == .whitelist {
-            let count = localWhitelistCount()
-            return count > 0 ? "Whitelist (\(count) site\(count == 1 ? "" : "s"))" : "Whitelist — no sites set up yet"
+            let adminCount = config.allowedWebsites.count
+            if adminCount > 0 {
+                return "Whitelist (\(adminCount) site\(adminCount == 1 ? "" : "s"))"
+            }
+            let localCount = localWhitelistCount()
+            return localCount > 0 ? "Whitelist (\(localCount) site\(localCount == 1 ? "" : "s"))" : "Whitelist active"
         }
         if config.blockedWebsites.isEmpty { return "Off" }
         return "Blocking \(config.blockedWebsites.count) site\(config.blockedWebsites.count == 1 ? "" : "s")"
