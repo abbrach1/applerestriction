@@ -13,14 +13,10 @@ struct ChildDeviceView: View {
     @EnvironmentObject var settingsManager: ActiveScreenTimeSettingsManager
     @EnvironmentObject var authManager: ActiveAuthorizationManager
     @State private var isRefreshing = false
-    @State private var showAdminSetup = false
-    @State private var showWebsiteSetup = false
     @State private var showSendAppList = false
     @State private var isSendingList = false
     @State private var listSentMessage: String?
-    @State private var contentBlockerEnabled: Bool = true  // assume enabled until checked
-    @State private var isEditingName = false
-    @State private var nameInput = ""
+    @State private var contentBlockerEnabled: Bool = true
     @State private var showUnlockRequest = false
     @State private var unlockReason = ""
     @State private var showChecklist = false
@@ -35,358 +31,253 @@ struct ChildDeviceView: View {
     @State private var appListSelection = FamilyActivitySelection()
     #endif
 
+    private let green = Color(red: 0, green: 0.4, blue: 0.15)
+
     var body: some View {
         let config = settingsManager.configuration
         TabView {
             mainTab(config: config)
                 .tabItem { Label("Home", systemImage: "shield.checkered") }
 
+            DeviceInfoTab()
+                .tabItem { Label("Device", systemImage: "iphone") }
+
             if config.browserEnabled {
                 SafeBrowserView()
                     .environmentObject(settingsManager)
                     .tabItem { Label("Browser", systemImage: "globe") }
             }
-
-            DeviceInfoTab()
-                .tabItem { Label("My Device", systemImage: "iphone") }
         }
-        .tint(Color(red: 0, green: 0.4, blue: 0.15))
+        .tint(green)
     }
 
     @ViewBuilder
     private func mainTab(config: ScreenTimeConfiguration) -> some View {
         NavigationStack {
-            List {
-                // Device identity
-                Section {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(Color(red: 0, green: 0.4, blue: 0.15).opacity(0.12))
-                                .frame(width: 56, height: 56)
-                            Image(systemName: "person.fill")
-                                .font(.title2)
-                                .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+            ScrollView {
+                VStack(spacing: 16) {
+
+                    // MARK: Profile hero card
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(LinearGradient(
+                                colors: [green, green.opacity(0.7)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle().fill(.white.opacity(0.2)).frame(width: 52, height: 52)
+                                Text(initials)
+                                    .font(.title3).fontWeight(.bold).foregroundStyle(.white)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(displayedName)
+                                    .font(.headline).foregroundStyle(.white)
+                                Text(UIDevice.current.name)
+                                    .font(.caption).foregroundStyle(.white.opacity(0.8))
+                                HStack(spacing: 4) {
+                                    Circle().fill(.white.opacity(0.9)).frame(width: 5, height: 5)
+                                    Text("Protected by B-SAFE")
+                                        .font(.caption2).foregroundStyle(.white.opacity(0.9))
+                                }
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Circle()
+                                    .fill(syncService.isOnline ? Color.green : Color.gray)
+                                    .frame(width: 10, height: 10)
+                                Text(syncService.isOnline ? "Online" : "Offline")
+                                    .font(.caption2).foregroundStyle(.white.opacity(0.8))
+                            }
                         }
-                        VStack(alignment: .leading, spacing: 3) {
-                            let name = syncService.displayName.isEmpty
-                                ? (auth.currentUser?.email ?? "")
-                                : syncService.displayName
-                            Text(name)
-                                .font(.subheadline).fontWeight(.semibold)
-                            if !syncService.displayName.isEmpty {
-                                Text(auth.currentUser?.email ?? "")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(UIDevice.current.name)
+                        .padding(16)
+                    }
+                    .padding(.horizontal)
+
+                    // MARK: Sync status bar
+                    HStack(spacing: 10) {
+                        if !syncService.isOnline {
+                            Image(systemName: "wifi.slash").foregroundStyle(.orange).font(.caption)
+                            Text("Offline — restrictions remain active")
                                 .font(.caption).foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                Circle().fill(.green).frame(width: 6, height: 6)
-                                Text("Protected by B-SAFE")
-                                    .font(.caption2).foregroundStyle(.green)
-                            }
+                        } else if let err = syncService.syncError {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).font(.caption)
+                            Text(err).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        } else if let last = syncService.lastSyncDate {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(green).font(.caption)
+                            Text("Synced \(last.formatted(.relative(presentation: .named)))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "arrow.clockwise").foregroundStyle(.secondary).font(.caption)
+                            Text("Not yet synced").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button {
-                            nameInput = syncService.displayName
-                            isEditingName = true
+                            Task { isRefreshing = true; await syncService.manualSync(); isRefreshing = false }
                         } label: {
-                            Image(systemName: "pencil.circle")
-                                .font(.title3)
-                                .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15).opacity(0.6))
+                            Group {
+                                if isRefreshing { ProgressView().scaleEffect(0.7) }
+                                else { Image(systemName: "arrow.clockwise") }
+                            }
+                            .frame(width: 28, height: 28)
+                            .background(green.opacity(0.1), in: Circle())
+                            .foregroundStyle(green)
                         }
+                        .disabled(isRefreshing || !syncService.isOnline)
                     }
-                    .padding(.vertical, 4)
-                }
+                    .padding(.horizontal)
 
-                // Active restrictions
-                Section("Active Restrictions") {
-                    StatusRow(icon: "lock.fill", label: "Device Lock",
-                              value: config.isLocked ? "LOCKED" : "Off",
-                              active: config.isLocked, color: .red)
-                    StatusRow(icon: "globe", label: "Website Filter",
-                              value: websiteFilterStatus(config),
-                              active: isWebsiteFilterActive(config), color: .blue)
-                    StatusRow(icon: "network.badge.shield.half.filled", label: "DNS Filter",
-                              value: config.forceDNS ? (config.nextDNSProfileID.isEmpty ? "On" : "Profile: \(config.nextDNSProfileID)") : "Off",
-                              active: config.forceDNS, color: .purple)
-                    StatusRow(icon: "square.grid.2x2.fill", label: "App Blocking",
-                              value: appBlockingStatus(config),
-                              active: isAppBlockingActive(config), color: .orange)
-                    StatusRow(icon: "moon.fill", label: "Downtime",
-                              value: downtimeStatus(config),
-                              active: config.downtimeEnabled, color: .purple)
-                    StatusRow(icon: "xmark.app.fill", label: "Block New Installs",
-                              value: config.blockNewApps ? "On" : "Off",
-                              active: config.blockNewApps, color: .orange)
-                }
+                    // MARK: Status card grid
+                    let columns = [GridItem(.flexible()), GridItem(.flexible())]
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        StatusCard(icon: "lock.fill",
+                                   value: config.isLocked ? "LOCKED" : "Off",
+                                   label: "Device Lock",
+                                   active: config.isLocked, color: .red)
+                        StatusCard(icon: "globe",
+                                   value: websiteFilterStatus(config),
+                                   label: "Web Filter",
+                                   active: isWebsiteFilterActive(config), color: .blue)
+                        StatusCard(icon: "network.badge.shield.half.filled",
+                                   value: config.forceDNS ? "On" : "Off",
+                                   label: "DNS Filter",
+                                   active: config.forceDNS, color: .purple)
+                        StatusCard(icon: "square.grid.2x2.fill",
+                                   value: appBlockingStatus(config),
+                                   label: "App Blocking",
+                                   active: isAppBlockingActive(config), color: .orange)
+                        StatusCard(icon: "moon.fill",
+                                   value: downtimeStatus(config),
+                                   label: "Downtime",
+                                   active: config.downtimeEnabled, color: .indigo)
+                        StatusCard(icon: "xmark.app.fill",
+                                   value: config.blockNewApps ? "On" : "Off",
+                                   label: "Block Installs",
+                                   active: config.blockNewApps, color: .orange)
+                    }
+                    .padding(.horizontal)
 
-                // Sync
-                Section {
-                    // Offline / error banner
-                    if !syncService.isOnline {
-                        HStack(spacing: 8) {
-                            Image(systemName: "wifi.slash")
-                                .foregroundStyle(.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Device is offline")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Restrictions remain active. Syncing when reconnected.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    // MARK: Alerts / pending items
+                    if config.websiteFilterMode == .whitelist && !contentBlockerEnabled {
+                        warningBanner(
+                            icon: "exclamationmark.shield.fill", color: .red,
+                            title: "Website filter not active",
+                            detail: "Go to Settings → Safari → Extensions → enable B-SAFE Content Blocker")
+                    }
+
+                    if !syncService.pendingWebsites.isEmpty {
+                        pendingCard(header: "Websites from Admin", icon: "globe.badge.exclamationmark") {
+                            ForEach(Array(syncService.pendingWebsites), id: \.key) { pushKey, domain in
+                                PendingWebsiteRow(pushKey: pushKey, domain: domain)
+                                    .environmentObject(auth)
+                                    .environmentObject(syncService)
+                                    .environmentObject(settingsManager)
+                                if domain != syncService.pendingWebsites.values.last { Divider() }
                             }
                         }
-                        .padding(.vertical, 2)
-                    } else if let err = syncService.syncError {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.yellow)
-                            Text(err)
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
 
-                    if let last = syncService.lastSyncDate {
-                        LabeledContent("Last Sync", value: last.formatted(.relative(presentation: .named)))
-                            .font(.caption)
-                    }
-                    Button {
-                        Task {
-                            isRefreshing = true
-                            await syncService.manualSync()
-                            isRefreshing = false
-                        }
-                    } label: {
-                        HStack {
-                            if isRefreshing { ProgressView().tint(.white) }
-                            else { Image(systemName: "arrow.clockwise") }
-                            Text(isRefreshing ? "Syncing..." : "Sync Settings Now")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(syncService.isOnline
-                                    ? Color(red: 0, green: 0.4, blue: 0.15)
-                                    : Color.gray)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isRefreshing || !syncService.isOnline)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                } header: { Text("Sync") }
-                footer: {
-                    Text(syncService.isOnline
-                         ? "Settings update automatically every 30 seconds."
-                         : "Will sync automatically when back online.")
-                }
-
-                // Pending website approvals from admin
-                if !syncService.pendingWebsites.isEmpty {
-                    Section {
-                        ForEach(Array(syncService.pendingWebsites), id: \.key) { pushKey, domain in
-                            PendingWebsiteRow(pushKey: pushKey, domain: domain)
-                                .environmentObject(auth)
-                                .environmentObject(syncService)
-                                .environmentObject(settingsManager)
-                        }
-                    } header: {
-                        Label("Website Requests from Admin", systemImage: "globe.badge.exclamationmark")
-                    } footer: {
-                        Text("Tap Allow to instantly add the site to your whitelist. The Safari content blocker updates immediately — no picker required.")
-                    }
-                }
-
-                // Content blocker warning — only shown in whitelist mode when extension is off
-                if config.websiteFilterMode == .whitelist && !contentBlockerEnabled {
-                    Section {
-                        HStack(spacing: 10) {
-                            Image(systemName: "exclamationmark.shield.fill")
-                                .foregroundStyle(.red)
-                                .font(.title3)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Website filter not active")
-                                    .font(.subheadline).fontWeight(.semibold)
-                                Text("Go to Settings → Safari → Extensions → enable B-SAFE Content Blocker")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    if !syncService.pendingApps.isEmpty {
+                        pendingCard(header: "Apps from Admin", icon: "arrow.down.app.fill") {
+                            ForEach(Array(syncService.pendingApps), id: \.key) { pushKey, app in
+                                PendingAppRow(pushKey: pushKey, app: app)
+                                    .environmentObject(syncService)
+                                if app.id != syncService.pendingApps.values.last?.id { Divider() }
                             }
                         }
-                        .padding(.vertical, 4)
                     }
-                }
 
-                // Apps pushed by admin
-                if !syncService.pendingApps.isEmpty {
-                    Section {
-                        ForEach(Array(syncService.pendingApps), id: \.key) { pushKey, app in
-                            PendingAppRow(pushKey: pushKey, app: app)
-                                .environmentObject(syncService)
-                        }
-                    } header: {
-                        Label("Apps from Admin", systemImage: "arrow.down.app.fill")
-                    } footer: {
-                        Text("Tap Get to install directly without leaving B-SAFE. Swipe to dismiss after installing.")
-                    }
-                }
-
-                // Send app list to admin for review
-                Section {
-                    if let msg = listSentMessage {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            Text(msg).foregroundStyle(.green).font(.subheadline)
-                        }
-                    }
-                    Button {
-                        showSendAppList = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Send App List to Admin")
-                                    .font(.subheadline).fontWeight(.medium)
-                                    .foregroundStyle(.primary)
-                                Text("Select your apps so admin can review and approve them")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    if !syncService.pendingWebsiteRequests.isEmpty {
+                        pendingCard(header: "Your Website Requests", icon: "clock.badge.exclamationmark") {
+                            ForEach(syncService.pendingWebsiteRequests, id: \.key) { item in
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.request.domain).font(.subheadline).fontWeight(.medium)
+                                        Text("Pending admin approval").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button("Cancel") {
+                                        Task { await syncService.cancelWebsiteRequest(key: item.key) }
+                                    }
+                                    .font(.caption).foregroundStyle(.red)
+                                }
+                                .padding(.vertical, 2)
+                                if item.key != syncService.pendingWebsiteRequests.last?.key { Divider() }
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                } header: { Text("App Review") }
-                  footer: { Text("If new app installs are blocked, send your app list to request admin approval.") }
 
-                // Website access requests
-                Section {
-                    ForEach(syncService.pendingWebsiteRequests, id: \.key) { item in
-                            HStack(spacing: 10) {
-                                Image(systemName: "globe.badge.exclamationmark")
-                                    .foregroundStyle(.blue)
+                    if let _ = syncService.pendingUnlockRequest {
+                        pendingCard(header: "Unlock Request", icon: "lock.open.fill") {
+                            HStack(spacing: 12) {
+                                ProgressView().tint(green)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.request.domain)
+                                    Text("Waiting for admin approval")
                                         .font(.subheadline).fontWeight(.medium)
-                                    Text("Pending admin approval")
-                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Button("Cancel") {
-                                    Task { await syncService.cancelWebsiteRequest(key: item.key) }
+                                    Task { await syncService.cancelUnlockRequest() }
                                 }
                                 .font(.caption).foregroundStyle(.red)
                             }
-                            .padding(.vertical, 2)
-                        }
-
-                        Button {
-                            websiteRequestDomain = ""
-                            websiteRequestReason = ""
-                            showWebsiteRequest = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "globe.badge.exclamationmark")
-                                    .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Request Website Access")
-                                        .foregroundStyle(.primary)
-                                    Text("Ask admin to allow a specific site")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    } header: { Text("Website Requests") }
-
-                // Unlock request
-                Section {
-                    if syncService.pendingUnlockRequest != nil {
-                        HStack(spacing: 12) {
-                            ProgressView().tint(Color(red: 0, green: 0.4, blue: 0.15))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Unlock request pending")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Waiting for admin approval")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Cancel") {
-                                Task { await syncService.cancelUnlockRequest() }
-                            }
-                            .font(.caption).foregroundStyle(.red)
-                        }
-                        .padding(.vertical, 4)
-                    } else {
-                        Button {
-                            unlockReason = ""
-                            showUnlockRequest = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "lock.open.fill")
-                                    .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Request Unlock")
-                                        .foregroundStyle(.primary)
-                                    Text("Ask admin to temporarily unlock the device")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
                         }
                     }
-                    // Emergency bypass code entry (hidden-ish — below unlock request)
-                    Button {
-                        bypassCode = ""
-                        showBypassEntry = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "key.fill")
-                                .foregroundStyle(.purple)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Enter Emergency Code")
-                                    .foregroundStyle(.primary)
-                                Text("Use a one-time code from your admin")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+
+                    // MARK: Action buttons grid
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ChildActionButton(icon: "arrow.clockwise", label: "Sync Now", color: green) {
+                            Task { isRefreshing = true; await syncService.manualSync(); isRefreshing = false }
+                        }
+                        ChildActionButton(icon: "lock.open.fill", label: "Request Unlock", color: .orange) {
+                            unlockReason = ""; showUnlockRequest = true
+                        }
+                        ChildActionButton(icon: "globe.badge.exclamationmark", label: "Request Website", color: .blue) {
+                            websiteRequestDomain = ""; websiteRequestReason = ""; showWebsiteRequest = true
+                        }
+                        ChildActionButton(icon: "square.and.arrow.up", label: "Send App List", color: .teal) {
+                            showSendAppList = true
                         }
                     }
-                } header: { Text("Unlock Request") }
+                    .padding(.horizontal)
 
-                Section {
-                    Button("Sign Out", role: .destructive) { auth.signOut() }
-                    Button {
-                        showChecklist = true
-                    } label: {
-                        Label("Setup Checklist", systemImage: "checklist")
-                            .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
-                            .font(.caption)
+                    if let msg = listSentMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            Text(msg).font(.caption).foregroundStyle(.green)
+                        }
+                        .padding(.horizontal)
                     }
-                    Button("App Blocking Setup") { showAdminSetup = true }
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                    Button("Website Whitelist Setup") { showWebsiteSetup = true }
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                } footer: {
-                    Text("App Blocking and Website Whitelist Setup require the admin PIN. Run these on the child's device to configure which apps are blocked and which websites are allowed.")
-                        .font(.caption2)
-                }
-                .sheet(isPresented: $showChecklist) {
-                    SetupChecklistView()
-                        .environmentObject(auth)
-                        .environmentObject(syncService)
-                        .environmentObject(settingsManager)
-                        .environmentObject(authManager)
+
+                    // MARK: Menu
+                    VStack(spacing: 0) {
+                        menuRow(icon: "key.fill", label: "Enter Emergency Code", color: .purple) {
+                            bypassCode = ""; showBypassEntry = true
+                        }
+                        Divider().padding(.leading, 52)
+                        menuRow(icon: "checklist", label: "Setup Checklist", color: green) {
+                            showChecklist = true
+                        }
+                        Divider().padding(.leading, 52)
+                        menuRow(icon: "rectangle.portrait.and.arrow.right", label: "Sign Out", color: .red) {
+                            auth.signOut()
+                        }
+                    }
+                    .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator), lineWidth: 0.5))
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
                 }
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("B-SAFE")
             .navigationBarTitleDisplayMode(.large)
-            // All alerts at NavigationStack level — avoids type-checker issues with Section-level alerts
-            .alert("Your Name", isPresented: $isEditingName) {
-                TextField("Name (e.g. David)", text: $nameInput).autocorrectionDisabled()
-                Button("Save") {
-                    let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
-                    Task { await syncService.setDisplayName(trimmed) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { Text("This name is shown to your admin.") }
+            .sheet(isPresented: $showChecklist) {
+                SetupChecklistView()
+                    .environmentObject(auth)
+                    .environmentObject(syncService)
+                    .environmentObject(settingsManager)
+                    .environmentObject(authManager)
+            }
             .alert("Request Website Access", isPresented: $showWebsiteRequest) {
                 TextField("Domain (e.g. youtube.com)", text: $websiteRequestDomain)
                     .autocorrectionDisabled().textInputAutocapitalization(.never).keyboardType(.URL)
@@ -434,17 +325,6 @@ struct ChildDeviceView: View {
             }
             .onChange(of: syncService.pendingApps.count) {
                 updateInstallationBlock()
-            }
-            .sheet(isPresented: $showAdminSetup) {
-                AdminSetupSheet()
-                    .environmentObject(auth)
-                    .environmentObject(syncService)
-                    .environmentObject(settingsManager)
-            }
-            .sheet(isPresented: $showWebsiteSetup) {
-                WebsiteSetupSheet()
-                    .environmentObject(auth)
-                    .environmentObject(settingsManager)
             }
             #if !targetEnvironment(simulator)
             .sheet(isPresented: $showSendAppList) {
@@ -581,6 +461,138 @@ struct ChildDeviceView: View {
             return String(format: "%d:%02d %@", hr, m, suffix)
         }
         return "\(fmt(s.startHour, s.startMinute)) – \(fmt(s.endHour, s.endMinute))"
+    }
+
+    private var displayedName: String {
+        syncService.displayName.isEmpty ? (auth.currentUser?.email ?? "B-SAFE User") : syncService.displayName
+    }
+
+    private var initials: String {
+        let words = displayedName.split(separator: " ")
+        if words.count >= 2 {
+            return String((words[0].first ?? "?")).uppercased() + String((words[1].first ?? "?")).uppercased()
+        }
+        return String(displayedName.prefix(2)).uppercased()
+    }
+
+    @ViewBuilder
+    private func warningBanner(icon: String, color: Color, title: String, detail: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(color).font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline).fontWeight(.semibold)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.2), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func pendingCard<Content: View>(header: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.caption).foregroundStyle(green)
+                Text(header).font(.caption).fontWeight(.semibold).foregroundStyle(green)
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
+            Divider()
+            content()
+                .padding(.horizontal, 14).padding(.vertical, 8)
+        }
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator), lineWidth: 0.5))
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func menuRow(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(color.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: icon).font(.subheadline).foregroundStyle(color)
+                }
+                Text(label).foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Status Card
+
+struct StatusCard: View {
+    let icon: String
+    let value: String
+    let label: String
+    let active: Bool
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundStyle(active ? color : .secondary)
+                Spacer()
+                Circle()
+                    .fill(active ? color : Color(.systemGray4))
+                    .frame(width: 7, height: 7)
+            }
+            Text(value)
+                .font(.subheadline).fontWeight(.semibold)
+                .foregroundStyle(active ? .primary : .secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Text(label)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(active ? color.opacity(0.08) : Color(.systemBackground),
+                    in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(active ? color.opacity(0.2) : Color(.separator), lineWidth: 0.5))
+    }
+}
+
+// MARK: - Child Action Button
+
+struct ChildActionButton: View {
+    let icon: String
+    let label: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.12))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: icon)
+                        .font(.title3)
+                        .foregroundStyle(color)
+                }
+                Text(label)
+                    .font(.caption).fontWeight(.medium)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 }
 

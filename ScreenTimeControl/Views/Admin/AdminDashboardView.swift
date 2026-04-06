@@ -258,6 +258,9 @@ class AdminUserViewModel: ObservableObject {
         _ = try? await URLSession.shared.data(for: req)
         unlockRequests.removeAll { $0.pushKey == pushKey }
         await sendCommand(.unlockAll, uid: uid, idToken: idToken)
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "✅ Unlock Approved",
+                             body: "Your admin approved your unlock request.")
     }
 
     func denyUnlockRequest(pushKey: String, uid: String, idToken: String) async {
@@ -266,6 +269,9 @@ class AdminUserViewModel: ObservableObject {
         req.httpMethod = "DELETE"
         _ = try? await URLSession.shared.data(for: req)
         unlockRequests.removeAll { $0.pushKey == pushKey }
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "❌ Unlock Denied",
+                             body: "Your admin denied your unlock request.")
     }
 
     func deleteUser(uid: String, idToken: String) async {
@@ -304,6 +310,9 @@ class AdminUserViewModel: ObservableObject {
         var req = URLRequest(url: url); req.httpMethod = "DELETE"
         _ = try? await URLSession.shared.data(for: req)
         websiteRequests.removeAll { $0.pushKey == pushKey }
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "✅ Website Approved",
+                             body: "\(domain) has been added to your allowed sites.")
     }
 
     func denyWebsiteRequest(pushKey: String, uid: String, idToken: String) async {
@@ -311,6 +320,27 @@ class AdminUserViewModel: ObservableObject {
         var req = URLRequest(url: url); req.httpMethod = "DELETE"
         _ = try? await URLSession.shared.data(for: req)
         websiteRequests.removeAll { $0.pushKey == pushKey }
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "❌ Website Denied",
+                             body: "Your admin denied access to the requested website.")
+    }
+
+    /// Queues a notification for the child device at /users/{uid}/notifications/{autoId}.
+    /// The child's background sync task reads this node and fires a local UNNotification,
+    /// then deletes the entry. No Firebase Messaging SDK required.
+    private func sendFCMToChild(uid: String, idToken: String, title: String, body: String) async {
+        let notification: [String: Any] = [
+            "title": title,
+            "body": body,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        guard let payloadData = try? JSONSerialization.data(withJSONObject: notification),
+              let url = URL(string: "\(dbURL)/users/\(uid)/notifications.json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = payloadData
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     func setEmergencyBypassCode(_ code: EmergencyBypassCode, uid: String, idToken: String) async {

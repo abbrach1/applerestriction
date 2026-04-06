@@ -417,6 +417,28 @@ class RemoteSyncService: ObservableObject {
         } catch {
             syncError = "Sync failed: \(error.localizedDescription)"
         }
+        await deliverPendingNotifications(uid: uid)
+    }
+
+    /// Reads /users/{uid}/notifications, fires local UNNotifications, then deletes each one.
+    private func deliverPendingNotifications(uid: String) async {
+        let snap = try? await dbRef.child("users/\(uid)/notifications").getData()
+        guard let dict = snap?.value as? [String: Any] else { return }
+        for (key, val) in dict {
+            guard let entry = val as? [String: Any],
+                  let title = entry["title"] as? String,
+                  let body = entry["body"] as? String else { continue }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            let req = UNNotificationRequest(
+                identifier: "bsafe.child.notify.\(key)",
+                content: content,
+                trigger: nil)
+            _ = try? await UNUserNotificationCenter.current().add(req)
+            _ = try? await dbRef.child("users/\(uid)/notifications/\(key)").removeValue()
+        }
     }
 
     // MARK: - Pending Item Removal
