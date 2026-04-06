@@ -650,16 +650,41 @@ struct AdminUserControlView: View {
                 .background(Color.orange)
             }
 
-            // Tab picker
-            Picker("Section", selection: $selectedTab) {
-                Label("Websites", systemImage: "globe").tag(0)
-                Label("Downtime", systemImage: "moon.fill").tag(1)
-                Label("Apps", systemImage: "square.grid.2x2.fill").tag(2)
-                Label("Commands", systemImage: "bolt.fill").tag(3)
+            // Scrollable tab picker (5 tabs)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach([
+                        (0, "globe",                    "Websites"),
+                        (1, "moon.fill",                "Downtime"),
+                        (2, "square.grid.2x2.fill",     "Apps"),
+                        (3, "bolt.fill",                "Commands"),
+                        (4, "network.badge.shield.half.filled", "DNS"),
+                    ], id: \.0) { tag, icon, label in
+                        Button {
+                            selectedTab = tag
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 14, weight: .medium))
+                                Text(label)
+                                    .font(.caption2).fontWeight(.medium)
+                            }
+                            .foregroundStyle(selectedTab == tag ? Color(red: 0, green: 0.4, blue: 0.15) : .secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .overlay(
+                                Rectangle()
+                                    .frame(height: 2)
+                                    .foregroundStyle(selectedTab == tag ? Color(red: 0, green: 0.4, blue: 0.15) : .clear),
+                                alignment: .bottom
+                            )
+                        }
+                    }
+                }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
+            .overlay(Rectangle().frame(height: 0.5).foregroundStyle(Color(.separator)), alignment: .bottom)
+            .padding(.top, 4)
 
             if vm.isLoading {
                 Spacer()
@@ -667,14 +692,11 @@ struct AdminUserControlView: View {
                 Spacer()
             } else {
                 TabView(selection: $selectedTab) {
-                    WebsiteTab(vm: vm, user: user)
-                        .tag(0)
-                    DowntimeTab(vm: vm, user: user)
-                        .tag(1)
-                    AppsTab(vm: vm, user: user)
-                        .tag(2)
-                    CommandsTab(vm: vm, user: user)
-                        .tag(3)
+                    WebsiteTab(vm: vm, user: user).tag(0)
+                    DowntimeTab(vm: vm, user: user).tag(1)
+                    AppsTab(vm: vm, user: user).tag(2)
+                    CommandsTab(vm: vm, user: user).tag(3)
+                    DNSTab(vm: vm, user: user).tag(4)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
@@ -1865,6 +1887,213 @@ struct CommandsTab: View {
                 .padding(.vertical, 4)
             }
         }
+    }
+}
+
+// MARK: - DNS Tab
+
+struct DNSTab: View {
+    @ObservedObject var vm: AdminUserViewModel
+    let user: ManagedUser
+    @EnvironmentObject var auth: FirebaseAuthService
+
+    @State private var selectedSection = 0  // 0=Logs, 1=Allow, 2=Block
+    @State private var logs: [DNSLogEntry] = []
+    @State private var allowList: [DNSListEntry] = []
+    @State private var blockList: [DNSListEntry] = []
+    @State private var isLoading = false
+    @State private var newAllowDomain = ""
+    @State private var newBlockDomain = ""
+    @State private var logFilter = ""       // filter logs by domain
+
+    private var profileID: String { vm.config.nextDNSProfileID }
+    private var apiKey: String { vm.config.nextDNSApiKey }
+    private var isConfigured: Bool { !profileID.isEmpty && !apiKey.isEmpty }
+
+    var body: some View {
+        if !isConfigured {
+            VStack(spacing: 16) {
+                Image(systemName: "network.badge.shield.half.filled")
+                    .font(.system(size: 48)).foregroundStyle(.secondary)
+                Text("NextDNS Not Configured")
+                    .font(.headline)
+                Text("Go to the Websites tab → DNS Filter and enter a Profile ID and API Key to enable DNS logs and filtering.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button("Go to DNS Settings") { /* handled by tab switch */ }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0, green: 0.4, blue: 0.15))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+        } else {
+            VStack(spacing: 0) {
+                // Segmented: Logs | Allow | Block
+                Picker("DNS Section", selection: $selectedSection) {
+                    Text("Logs").tag(0)
+                    Text("Allow").tag(1)
+                    Text("Block").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal).padding(.vertical, 10)
+
+                if isLoading {
+                    Spacer(); ProgressView("Loading…"); Spacer()
+                } else {
+                    switch selectedSection {
+                    case 0: logsView
+                    case 1: listView(entries: allowList, endpoint: "allowlist", newDomain: $newAllowDomain, color: .green, label: "Allowed")
+                    default: listView(entries: blockList, endpoint: "denylist",  newDomain: $newBlockDomain, color: .red,   label: "Blocked")
+                    }
+                }
+            }
+            .task { await reload() }
+            .onChange(of: selectedSection) { _, _ in Task { await reload() } }
+        }
+    }
+
+    // MARK: Logs View
+
+    private var logsView: some View {
+        VStack(spacing: 0) {
+            // Filter bar
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filter by domain", text: $logFilter)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                if !logFilter.isEmpty {
+                    Button { logFilter = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color(.systemGray6))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal).padding(.bottom, 8)
+
+            let filtered = logFilter.isEmpty ? logs : logs.filter { $0.domain.localizedCaseInsensitiveContains(logFilter) }
+
+            if filtered.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "clock.arrow.2.circlepath").font(.system(size: 36)).foregroundStyle(.secondary)
+                    Text(logs.isEmpty ? "No logs yet" : "No matches for "\(logFilter)"")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(filtered) { entry in
+                        HStack(spacing: 10) {
+                            Image(systemName: entry.blocked ? "xmark.circle.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(entry.blocked ? .red : .green)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.domain)
+                                    .font(.subheadline).fontWeight(.medium).lineLimit(1)
+                                HStack(spacing: 6) {
+                                    if !entry.deviceName.isEmpty {
+                                        Text(entry.deviceName).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    if !entry.reason.isEmpty {
+                                        Text("·").font(.caption2).foregroundStyle(.tertiary)
+                                        Text(entry.reason).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            Text(entry.timestamp.formatted(.relative(presentation: .named)))
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 2)
+                        // Long-press to add to allow/block
+                        .contextMenu {
+                            Button {
+                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "allowlist", profileID: profileID, apiKey: apiKey) }
+                            } label: { Label("Add to Allow List", systemImage: "checkmark.circle") }
+                            Button(role: .destructive) {
+                                Task { try? await NextDNSService.shared.addDomain(entry.domain, to: "denylist", profileID: profileID, apiKey: apiKey) }
+                            } label: { Label("Add to Block List", systemImage: "xmark.circle") }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { Task { await reload() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+        }
+    }
+
+    // MARK: Allow / Block List View
+
+    private func listView(entries: [DNSListEntry], endpoint: String,
+                          newDomain: Binding<String>, color: Color, label: String) -> some View {
+        List {
+            Section {
+                HStack {
+                    TextField("domain (e.g. tiktok.com)", text: newDomain)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never).keyboardType(.URL)
+                    Button("Add") {
+                        let d = newDomain.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        guard !d.isEmpty else { return }
+                        newDomain.wrappedValue = ""
+                        Task {
+                            try? await NextDNSService.shared.addDomain(d, to: endpoint, profileID: profileID, apiKey: apiKey)
+                            await reload()
+                        }
+                    }
+                    .disabled(newDomain.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .foregroundStyle(color)
+                }
+            } header: { Text("Add to \(label) List") }
+
+            if entries.isEmpty {
+                Section {
+                    Text("No entries yet. Add a domain above.")
+                        .foregroundStyle(.secondary).font(.subheadline)
+                }
+            } else {
+                Section {
+                    ForEach(entries) { entry in
+                        HStack {
+                            Image(systemName: color == .green ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(color)
+                            Text(entry.id).font(.subheadline)
+                            if !entry.active { Text("(inactive)").font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                    .onDelete { indices in
+                        let toDelete = indices.map { entries[$0].id }
+                        Task {
+                            for d in toDelete {
+                                try? await NextDNSService.shared.removeDomain(d, from: endpoint, profileID: profileID, apiKey: apiKey)
+                            }
+                            await reload()
+                        }
+                    }
+                } header: {
+                    Text("\(label) List (\(entries.count))")
+                }
+            }
+        }
+    }
+
+    // MARK: Load
+
+    private func reload() async {
+        guard isConfigured else { return }
+        isLoading = true
+        async let l = NextDNSService.shared.fetchLogs(profileID: profileID, apiKey: apiKey)
+        async let a = NextDNSService.shared.fetchList("allowlist", profileID: profileID, apiKey: apiKey)
+        async let b = NextDNSService.shared.fetchList("denylist",  profileID: profileID, apiKey: apiKey)
+        (logs, allowList, blockList) = await (l, a, b)
+        isLoading = false
     }
 }
 

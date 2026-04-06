@@ -13,14 +13,8 @@ class NextDNSService {
 
     private init() {}
 
-    // MARK: - Public API
+    // MARK: - Sync (called from Apply Website Settings)
 
-    /// Full sync: pushes allowedWebsites → NextDNS allowlist,
-    /// blockedWebsites → NextDNS denylist.
-    ///
-    /// In whitelist mode: also enables NextDNS "allowlist only" mode so ONLY
-    /// the listed domains resolve — everything else is blocked at DNS level
-    /// system-wide across ALL apps and browsers, not just Safari.
     func sync(profileID: String,
               apiKey: String,
               allowedDomains: [String],
@@ -29,55 +23,69 @@ class NextDNSService {
         guard !profileID.isEmpty, !apiKey.isEmpty else {
             return SyncResult(success: false, error: "Profile ID or API key missing")
         }
-
         do {
-            // Sync allowlist
-            try await replaceList(endpoint: "allowlist",
-                                  profileID: profileID,
-                                  apiKey: apiKey,
-                                  domains: allowedDomains)
-
-            // Sync denylist
-            try await replaceList(endpoint: "denylist",
-                                  profileID: profileID,
-                                  apiKey: apiKey,
-                                  domains: blockedDomains)
-
-            // Whitelist-only mode: block everything except allowlist at DNS level
-            try await setAllowlistOnlyMode(profileID: profileID,
-                                           apiKey: apiKey,
+            try await replaceList(endpoint: "allowlist", profileID: profileID, apiKey: apiKey, domains: allowedDomains)
+            try await replaceList(endpoint: "denylist",  profileID: profileID, apiKey: apiKey, domains: blockedDomains)
+            try await setAllowlistOnlyMode(profileID: profileID, apiKey: apiKey,
                                            enabled: whitelistMode && !allowedDomains.isEmpty)
-
             return SyncResult(success: true, error: nil)
         } catch {
             return SyncResult(success: false, error: error.localizedDescription)
         }
     }
 
-    /// Enable/disable NextDNS "block everything except allowlist" mode.
-    /// When on, ANY domain not in the allowlist returns NXDOMAIN — works in
-    /// Safari, Chrome, every app, including DNS-over-HTTPS bypasses.
-    private func setAllowlistOnlyMode(profileID: String, apiKey: String, enabled: Bool) async throws {
-        // NextDNS setting: profiles/{id}/settings → blockPage.enabled + allowlist-only via
-        // the "Block Bypass Methods" + allowlist entries with active:true take priority.
-        // The cleanest way is the "allowlist" entries already have priority over blocklists.
-        // For true whitelist-only, use the privacy "blocklists" approach by blocking TLDs
-        // and only allowing via allowlist — but the supported API path is:
-        // PATCH /profiles/{id}/settings with { "blockPage": { ... }, "logging": { ... } }
-        // The whitelist-only mode flag is not directly in the public API, so we approximate
-        // it by adding a wildcard "*" denylist entry which blocks everything, letting the
-        // allowlist entries override (allowlist always wins over denylist in NextDNS).
-        let denyURL = "\(base)/profiles/\(profileID)/denylist"
-        if enabled {
-            // Add wildcard block — allowlist entries override this for allowed domains
-            try await addEntry(listURL: denyURL, apiKey: apiKey, domain: "*")
-        } else {
-            // Remove wildcard block if present
-            try await removeEntry(listURL: denyURL, apiKey: apiKey, domain: "*")
+    // MARK: - Logs
+
+    /// Fetch the most recent DNS query logs for a profile.
+    func fetchLogs(profileID: String, apiKey: String, limit: Int = 100) async -> [DNSLogEntry] {
+        guard let url = URL(string: "\(base)/profiles/\(profileID)/logs?limit=\(limit)") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json["data"] as? [[String: Any]] else { return [] }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let iso2 = ISO8601DateFormatter() // fallback without fractional seconds
+
+        return arr.compactMap { entry in
+            guard let domain = entry["domain"] as? String else { return nil }
+            let blocked = entry["blocked"] as? Bool ?? false
+            let tsStr = entry["timestamp"] as? String ?? ""
+            let timestamp = iso.date(from: tsStr) ?? iso2.date(from: tsStr) ?? Date()
+            let deviceName = (entry["device"] as? [String: Any])?["name"] as? String ?? ""
+            let reason = (entry["reason"] as? [String: Any])?["name"] as? String ?? ""
+            return DNSLogEntry(timestamp: timestamp, domain: domain, blocked: blocked,
+                               deviceName: deviceName, reason: reason)
         }
     }
 
-    /// Fetch the profile name from NextDNS (validates the API key + profile ID).
+    // MARK: - Per-User Allow / Block List Management
+
+    func fetchList(_ endpoint: String, profileID: String, apiKey: String) async -> [DNSListEntry] {
+        guard let url = URL(string: "\(base)/profiles/\(profileID)/\(endpoint)") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json["data"] as? [[String: Any]] else { return [] }
+        return arr.compactMap { d in
+            guard let id = d["id"] as? String else { return nil }
+            return DNSListEntry(id: id, active: d["active"] as? Bool ?? true)
+        }
+    }
+
+    func addDomain(_ domain: String, to endpoint: String, profileID: String, apiKey: String) async throws {
+        try await addEntry(listURL: "\(base)/profiles/\(profileID)/\(endpoint)", apiKey: apiKey, domain: domain)
+    }
+
+    func removeDomain(_ domain: String, from endpoint: String, profileID: String, apiKey: String) async throws {
+        try await removeEntry(listURL: "\(base)/profiles/\(profileID)/\(endpoint)", apiKey: apiKey, domain: domain)
+    }
+
+    // MARK: - Profile Info
+
     func fetchProfileName(profileID: String, apiKey: String) async -> String? {
         guard let url = URL(string: "\(base)/profiles/\(profileID)") else { return nil }
         var req = URLRequest(url: url)
@@ -88,7 +96,6 @@ class NextDNSService {
         return name
     }
 
-    /// Fetch all profiles for this API key (used to let admin pick the right one).
     func fetchProfiles(apiKey: String) async -> [NextDNSProfile] {
         guard let url = URL(string: "\(base)/profiles") else { return [] }
         var req = URLRequest(url: url)
@@ -104,37 +111,30 @@ class NextDNSService {
 
     // MARK: - Private helpers
 
-    private func replaceList(endpoint: String,
-                             profileID: String,
-                             apiKey: String,
-                             domains: [String]) async throws {
-        let listURL = "\(base)/profiles/\(profileID)/\(endpoint)"
+    private func setAllowlistOnlyMode(profileID: String, apiKey: String, enabled: Bool) async throws {
+        let denyURL = "\(base)/profiles/\(profileID)/denylist"
+        if enabled {
+            try await addEntry(listURL: denyURL, apiKey: apiKey, domain: "*")
+        } else {
+            try await removeEntry(listURL: denyURL, apiKey: apiKey, domain: "*")
+        }
+    }
 
-        // 1. Fetch existing entries
+    private func replaceList(endpoint: String, profileID: String, apiKey: String, domains: [String]) async throws {
+        let listURL = "\(base)/profiles/\(profileID)/\(endpoint)"
         guard let getURL = URL(string: listURL) else { return }
         var getReq = URLRequest(url: getURL)
         getReq.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
         let (listData, _) = try await URLSession.shared.data(for: getReq)
-
-        // Extract existing IDs (domain strings)
         var existing: [String] = []
         if let json = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
            let arr = json["data"] as? [[String: Any]] {
             existing = arr.compactMap { $0["id"] as? String }
         }
-
         let desired = Set(domains.map { $0.lowercased() })
         let current = Set(existing)
-
-        // 2. Add new domains
-        for domain in desired.subtracting(current) {
-            try await addEntry(listURL: listURL, apiKey: apiKey, domain: domain)
-        }
-
-        // 3. Remove deleted domains
-        for domain in current.subtracting(desired) {
-            try await removeEntry(listURL: listURL, apiKey: apiKey, domain: domain)
-        }
+        for domain in desired.subtracting(current) { try await addEntry(listURL: listURL, apiKey: apiKey, domain: domain) }
+        for domain in current.subtracting(desired) { try await removeEntry(listURL: listURL, apiKey: apiKey, domain: domain) }
     }
 
     private func addEntry(listURL: String, apiKey: String, domain: String) async throws {
@@ -166,4 +166,18 @@ struct SyncResult {
 struct NextDNSProfile: Identifiable {
     let id: String
     let name: String
+}
+
+struct DNSLogEntry: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let domain: String
+    let blocked: Bool
+    let deviceName: String
+    let reason: String
+}
+
+struct DNSListEntry: Identifiable {
+    let id: String  // domain
+    let active: Bool
 }
