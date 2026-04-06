@@ -34,6 +34,8 @@
 		A10030 /* ChildDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10030 /* ChildDeviceView.swift */; };
 		A10050 /* SafeBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10050 /* SafeBrowserView.swift */; };
 		BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10060 /* ContentFilterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10060 /* ContentFilterService.swift */; };
+		CF10001 /* BSAFEContentFilter.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = CF10002 /* BSAFEContentFilter.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -43,6 +45,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = BDCBC9A02F82C08B000E9E56;
 			remoteInfo = BSAFEContentBlocker;
+		};
+		CF10003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E10000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CF10000;
+			remoteInfo = BSAFEContentFilter;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -54,6 +63,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */,
+				CF10001 /* BSAFEContentFilter.appex in Embed Extensions */,
 			);
 			name = "Embed Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -103,6 +113,8 @@
 		B40003 /* ShieldAction.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShieldAction.entitlements; sourceTree = "<group>"; };
 		B40004 /* ShieldAction-Simulator.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShieldAction-Simulator.entitlements"; sourceTree = "<group>"; };
 		BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BSAFEContentBlocker.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10060 /* ContentFilterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentFilterService.swift; sourceTree = "<group>"; };
+		CF10002 /* BSAFEContentFilter.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BSAFEContentFilter.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000 /* ScreenTimeControl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScreenTimeControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000 /* DeviceActivityMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C30000 /* ShieldConfiguration.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShieldConfiguration.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -117,14 +129,30 @@
 			);
 			target = BDCBC9A02F82C08B000E9E56 /* BSAFEContentBlocker */;
 		};
+		CF10004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				BSAFEContentFilter.entitlements,
+				Info.plist,
+			);
+			target = CF10000 /* BSAFEContentFilter */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		BDCBC9A22F82C08B000E9E56 /* BSAFEContentBlocker */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (BDCBC9AB2F82C08C000E9E56 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BSAFEContentBlocker; sourceTree = "<group>"; };
+		CF10005 /* BSAFEContentFilter */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (CF10004 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BSAFEContentFilter; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		BDCBC99E2F82C08B000E9E56 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CF10006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -149,6 +177,7 @@
 				G30000 /* ShieldConfiguration */,
 				G40000 /* ShieldAction */,
 				BDCBC9A22F82C08B000E9E56 /* BSAFEContentBlocker */,
+				CF10005 /* BSAFEContentFilter */,
 				G50000 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -198,6 +227,7 @@
 				B10022 /* FirebaseAuthService.swift */,
 				B10040 /* ContentBlockerService.swift */,
 				B10051 /* NextDNSService.swift */,
+				B10060 /* ContentFilterService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -310,6 +340,7 @@
 				C30000 /* ShieldConfiguration.appex */,
 				C40000 /* ShieldAction.appex */,
 				BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */,
+				CF10002 /* BSAFEContentFilter.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -339,6 +370,28 @@
 			productReference = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		CF10000 /* BSAFEContentFilter */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CF10007 /* Build configuration list for PBXNativeTarget "BSAFEContentFilter" */;
+			buildPhases = (
+				CF10008 /* Sources */,
+				CF10006 /* Frameworks */,
+				CF10009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CF10005 /* BSAFEContentFilter */,
+			);
+			name = BSAFEContentFilter;
+			packageProductDependencies = (
+			);
+			productName = BSAFEContentFilter;
+			productReference = CF10002 /* BSAFEContentFilter.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		T10000 /* ScreenTimeControl */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = X10000 /* Build configuration list for PBXNativeTarget "ScreenTimeControl" */;
@@ -352,6 +405,7 @@
 			);
 			dependencies = (
 				BDCBC9A92F82C08C000E9E56 /* PBXTargetDependency */,
+				CF10010 /* PBXTargetDependency */,
 			);
 			name = ScreenTimeControl;
 			productName = ScreenTimeControl;
@@ -369,6 +423,9 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					BDCBC9A02F82C08B000E9E56 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					CF10000 = {
 						CreatedOnToolsVersion = 26.4;
 					};
 					T10000 = {
@@ -391,12 +448,20 @@
 			targets = (
 				T10000 /* ScreenTimeControl */,
 				BDCBC9A02F82C08B000E9E56 /* BSAFEContentBlocker */,
+				CF10000 /* BSAFEContentFilter */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		BDCBC99F2F82C08B000E9E56 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CF10009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -422,6 +487,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CF10008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		S10000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -436,6 +508,7 @@
 				A10040 /* ContentBlockerService.swift in Sources */,
 				A10050 /* SafeBrowserView.swift in Sources */,
 				A10051 /* NextDNSService.swift in Sources */,
+				A10060 /* ContentFilterService.swift in Sources */,
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,
@@ -460,6 +533,11 @@
 			isa = PBXTargetDependency;
 			target = BDCBC9A02F82C08B000E9E56 /* BSAFEContentBlocker */;
 			targetProxy = BDCBC9A82F82C08C000E9E56 /* PBXContainerItemProxy */;
+		};
+		CF10010 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CF10000 /* BSAFEContentFilter */;
+			targetProxy = CF10003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -694,6 +772,131 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		CF10011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = BSAFEContentFilter/BSAFEContentFilter.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NV5VW682KB;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BSAFEContentFilter/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = BSAFEContentFilter;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrolabbrach.BSAFEContentFilter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		CF10012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = BSAFEContentFilter/BSAFEContentFilter.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NV5VW682KB;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BSAFEContentFilter/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = BSAFEContentFilter;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.abbrachfeld.screentimecontrolabbrach.BSAFEContentFilter;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		BDCBC9AC2F82C08C000E9E56 /* Build configuration list for PBXNativeTarget "BSAFEContentBlocker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -717,6 +920,15 @@
 			buildConfigurations = (
 				XC1001 /* Debug */,
 				XC1002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CF10007 /* Build configuration list for PBXNativeTarget "BSAFEContentFilter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CF10011 /* Debug */,
+				CF10012 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
