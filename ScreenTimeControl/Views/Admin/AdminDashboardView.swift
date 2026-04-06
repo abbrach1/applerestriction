@@ -443,11 +443,13 @@ struct AdminDashboardView: View {
                 if vm.isLoading {
                     ProgressView("Loading users...")
                 } else if vm.users.isEmpty {
-                    ContentUnavailableView(
-                        "No Users Yet",
-                        systemImage: "person.2.slash",
-                        description: Text("Add users in Firebase Console under Authentication.")
-                    )
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.2.slash")
+                            .font(.system(size: 48)).foregroundStyle(.secondary)
+                        Text("No Users Yet").font(.headline)
+                        Text("Add users in Firebase Console under Authentication.")
+                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }.padding()
                 } else {
                     List {
                         ForEach(vm.users) { user in
@@ -708,6 +710,7 @@ struct AdminUserControlView: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @StateObject private var vm = AdminUserViewModel()
     @State private var selectedTab = 0
+    @State private var nextDNSApiKey = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -848,6 +851,9 @@ struct AdminUserControlView: View {
         .task {
             let token = await auth.freshToken() ?? ""
             await vm.load(uid: user.uid, idToken: token)
+            if let local = UserDefaults.standard.string(forKey: "bsafe.nextDNSApiKey"), !local.isEmpty {
+                nextDNSApiKey = local
+            }
         }
     }
 }
@@ -2210,7 +2216,7 @@ struct DNSTab: View {
                 }
             }
             .task { await reload() }
-            .onChange(of: selectedSection) { _, _ in
+            .onChange(of: selectedSection) { _ in
                 if selectedSection != 3 { Task { await reload() } }
             }
         }
@@ -2374,7 +2380,7 @@ struct DNSTab: View {
             }
 
             Section {
-                Toggle(isOn: $vm.config.safeSearchEnabled) {
+                Toggle(isOn: Binding(get: { vm.config.safeSearchEnabled }, set: { vm.config.safeSearchEnabled = $0 })) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Force SafeSearch")
@@ -2383,7 +2389,7 @@ struct DNSTab: View {
                         }
                     } icon: { Image(systemName: "magnifyingglass.circle.fill").foregroundStyle(.blue) }
                 }
-                Toggle(isOn: $vm.config.youtubeRestrictedEnabled) {
+                Toggle(isOn: Binding(get: { vm.config.youtubeRestrictedEnabled }, set: { vm.config.youtubeRestrictedEnabled = $0 })) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("YouTube Restricted Mode")
@@ -2423,7 +2429,7 @@ struct DNSTab: View {
                     Task {
                         isSavingSafety = true
                         let token = await auth.freshToken() ?? ""
-                        await vm.save(uid: user.uid, idToken: token)
+                        await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
                         await NextDNSService.shared.applyParentalControl(
                             profileID: profileID,
                             apiKey: effectiveApiKey,
