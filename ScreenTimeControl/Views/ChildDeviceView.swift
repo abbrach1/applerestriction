@@ -46,6 +46,9 @@ struct ChildDeviceView: View {
                     .environmentObject(settingsManager)
                     .tabItem { Label("Browser", systemImage: "globe") }
             }
+
+            DeviceInfoTab()
+                .tabItem { Label("My Device", systemImage: "iphone") }
         }
         .tint(Color(red: 0, green: 0.4, blue: 0.15))
     }
@@ -578,6 +581,130 @@ struct ChildDeviceView: View {
             return String(format: "%d:%02d %@", hr, m, suffix)
         }
         return "\(fmt(s.startHour, s.startMinute)) – \(fmt(s.endHour, s.endMinute))"
+    }
+}
+
+// MARK: - Device Info Tab
+
+struct DeviceInfoTab: View {
+    @State private var batteryLevel: Float = -1
+    @State private var batteryState: UIDevice.BatteryState = .unknown
+    @State private var storageTotal: Int64 = 0
+    @State private var storageFree: Int64 = 0
+
+    private let green = Color(red: 0, green: 0.4, blue: 0.15)
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // Device identity
+                Section("Device") {
+                    LabeledContent("Name", value: UIDevice.current.name)
+                    LabeledContent("Model", value: UIDevice.current.localizedModel)
+                    LabeledContent("iOS Version", value: UIDevice.current.systemVersion)
+                    LabeledContent("System", value: UIDevice.current.systemName)
+                }
+
+                // Battery
+                Section {
+                    if batteryLevel >= 0 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Battery")
+                                Spacer()
+                                Text(batteryStateLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(batteryStateColor)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(batteryStateColor.opacity(0.12), in: Capsule())
+                            }
+                            ProgressView(value: Double(batteryLevel))
+                                .tint(batteryColor)
+                            Text("\(Int(batteryLevel * 100))%")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        HStack {
+                            Text("Battery")
+                            Spacer()
+                            Text("Unavailable").foregroundStyle(.secondary).font(.caption)
+                        }
+                    }
+                } header: { Text("Battery") }
+
+                // Storage
+                Section {
+                    if storageTotal > 0 {
+                        let used = storageTotal - storageFree
+                        let fraction = Double(used) / Double(storageTotal)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Storage Used")
+                                Spacer()
+                                Text("\(formatBytes(used)) / \(formatBytes(storageTotal))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: fraction)
+                                .tint(fraction > 0.9 ? .red : fraction > 0.7 ? .orange : green)
+                            Text("\(formatBytes(storageFree)) free")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        HStack {
+                            Text("Storage")
+                            Spacer()
+                            Text("Unavailable").foregroundStyle(.secondary).font(.caption)
+                        }
+                    }
+                } header: { Text("Storage") }
+            }
+            .navigationTitle("My Device")
+            .navigationBarTitleDisplayMode(.large)
+            .task { loadDeviceInfo() }
+        }
+    }
+
+    private func loadDeviceInfo() {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        batteryLevel = UIDevice.current.batteryLevel
+        batteryState = UIDevice.current.batteryState
+        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()) {
+            storageTotal = attrs[.systemSize] as? Int64 ?? 0
+            storageFree  = attrs[.systemFreeSize] as? Int64 ?? 0
+        }
+    }
+
+    private var batteryStateLabel: String {
+        switch batteryState {
+        case .charging:  return "Charging"
+        case .full:      return "Full"
+        case .unplugged: return "Unplugged"
+        default:         return "Unknown"
+        }
+    }
+
+    private var batteryStateColor: Color {
+        switch batteryState {
+        case .charging: return .orange
+        case .full:     return green
+        default:
+            guard batteryLevel >= 0 else { return .secondary }
+            return batteryLevel < 0.2 ? .red : batteryLevel < 0.4 ? .orange : green
+        }
+    }
+
+    private var batteryColor: Color {
+        guard batteryLevel >= 0 else { return green }
+        return batteryLevel < 0.2 ? .red : batteryLevel < 0.4 ? .orange : green
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / 1_073_741_824
+        if gb >= 1 { return String(format: "%.1f GB", gb) }
+        let mb = Double(bytes) / 1_048_576
+        return String(format: "%.0f MB", mb)
     }
 }
 
