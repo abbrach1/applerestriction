@@ -1408,6 +1408,7 @@ struct SetupChecklistView: View {
     @State private var notifStatus: UNAuthorizationStatus = .notDetermined
     @State private var contentBlockerOn = false
     @State private var networkFilterOn = false
+    @State private var networkFilterError: String? = nil
     @State private var isLoading = true
 
     var body: some View {
@@ -1453,12 +1454,14 @@ struct SetupChecklistView: View {
                     #if !targetEnvironment(simulator)
                     ChecklistRow(
                         title: "Network Filter Active",
-                        detail: "Blocks websites system-wide across all apps",
+                        detail: networkFilterError ?? "Blocks websites system-wide across all apps",
                         done: networkFilterOn,
                         action: networkFilterOn ? nil : {
                             Task {
-                                await ContentFilterService.shared.enable(config: settingsManager.configuration)
+                                networkFilterError = nil
+                                let err = await ContentFilterService.shared.enable(config: settingsManager.configuration)
                                 networkFilterOn = await ContentFilterService.shared.isEnabled()
+                                if !networkFilterOn { networkFilterError = err ?? "Failed — check console" }
                             }
                         },
                         actionLabel: "Enable"

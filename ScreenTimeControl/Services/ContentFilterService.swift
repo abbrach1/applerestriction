@@ -27,9 +27,11 @@ class ContentFilterService {
     }
 
     /// Write rules to shared container and enable the filter.
-    func enable(config: ScreenTimeConfiguration) async {
+    /// Returns an error description if saveToPreferences fails, nil on success.
+    @discardableResult
+    func enable(config: ScreenTimeConfiguration) async -> String? {
         writeRules(config)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
             NEFilterManager.shared().loadFromPreferences { _ in
                 let pc = NEFilterProviderConfiguration()
                 pc.filterBrowsers = true
@@ -38,8 +40,12 @@ class ContentFilterService {
                 NEFilterManager.shared().isEnabled = true
                 NEFilterManager.shared().localizedDescription = "B-SAFE Content Filter"
                 NEFilterManager.shared().saveToPreferences { error in
-                    if let error { print("[B-SAFE] ContentFilter enable error: \(error)") }
-                    continuation.resume()
+                    if let error {
+                        print("[B-SAFE] ContentFilter enable error: \(error)")
+                        continuation.resume(returning: error.localizedDescription)
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
             }
         }
