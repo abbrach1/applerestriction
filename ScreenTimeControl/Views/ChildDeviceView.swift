@@ -1457,8 +1457,8 @@ struct SetupChecklistView: View {
                         detail: networkFilterError ?? "Blocks websites system-wide across all apps",
                         done: networkFilterOn,
                         action: networkFilterOn ? nil : {
+                            networkFilterError = nil
                             Task {
-                                networkFilterError = nil
                                 let err = await ContentFilterService.shared.enable(config: settingsManager.configuration)
                                 networkFilterOn = await ContentFilterService.shared.isEnabled()
                                 if !networkFilterOn { networkFilterError = err ?? "Failed — check console" }
