@@ -2136,6 +2136,7 @@ struct DNSTab: View {
     @State private var logFilter = ""
     @State private var isSavingSafety = false
     @State private var safetySaved = false
+    @State private var autoRefreshTimer: Timer? = nil
 
     private var profileID: String { vm.config.nextDNSProfileID }
     private var effectiveApiKey: String { globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey }
@@ -2181,11 +2182,30 @@ struct DNSTab: View {
                     }
                 }
             }
-            .task { await reload() }
+            .task {
+                await reload()
+                startAutoRefresh()
+            }
             .onChange(of: selectedSection) { _ in
                 if selectedSection != 3 { Task { await reload() } }
             }
+            .onDisappear { stopAutoRefresh() }
         }
+    }
+
+    private func startAutoRefresh() {
+        stopAutoRefresh()
+        guard isConfigured else { return }
+        autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            Task { @MainActor in
+                if selectedSection != 3 { await reload() }
+            }
+        }
+    }
+
+    private func stopAutoRefresh() {
+        autoRefreshTimer?.invalidate()
+        autoRefreshTimer = nil
     }
 
     // MARK: Logs View

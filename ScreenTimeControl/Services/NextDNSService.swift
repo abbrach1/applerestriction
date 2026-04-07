@@ -204,13 +204,15 @@ class NextDNSService {
             return dict["id"] as? String
         })
 
-        // Add what should be blocked but isn't
-        for id in activeIDs where !currentlyBlocked.contains(id) {
-            if let addURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)/\(id)") {
-                var req = URLRequest(url: addURL); req.httpMethod = "POST"
+        // Add what should be blocked but isn't.
+        // POST to the collection URL with {"id": ..., "active": true} — same pattern as allowlist/denylist.
+        if let collectionURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") {
+            for id in activeIDs where !currentlyBlocked.contains(id) {
+                var req = URLRequest(url: collectionURL)
+                req.httpMethod = "POST"
                 req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
                 req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.httpBody = "{\"active\":true}".data(using: .utf8)
+                req.httpBody = try? JSONSerialization.data(withJSONObject: ["id": id, "active": true])
                 _ = try? await URLSession.shared.data(for: req)
             }
         }

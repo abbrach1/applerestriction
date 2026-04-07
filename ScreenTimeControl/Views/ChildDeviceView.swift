@@ -245,6 +245,32 @@ struct ChildDeviceView: View {
     }
 
     @ViewBuilder private func pendingSection(config: ScreenTimeConfiguration) -> some View {
+        if syncService.dnsProtectionMissing && config.forceDNS {
+            HStack(spacing: 12) {
+                Image(systemName: "network.slash").font(.title3).foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("DNS Protection Disabled").font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
+                    Text("Your internet filter has been turned off.").font(.caption).foregroundStyle(.white.opacity(0.85))
+                }
+                Spacer()
+                Button("Restore") {
+                    Task {
+                        #if !targetEnvironment(simulator)
+                        await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+                        let ok = await ContentBlockerService.shared.isDNSEnabled()
+                        await MainActor.run { syncService.dnsProtectionMissing = !ok }
+                        #endif
+                    }
+                }
+                .font(.caption).fontWeight(.semibold)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(.white)
+            }
+            .padding()
+            .background(Color.red, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal)
+        }
         if config.websiteFilterMode == .whitelist && !contentBlockerEnabled {
             warningBanner(icon: "exclamationmark.shield.fill", color: .red,
                           title: "Website filter not active",

@@ -19,6 +19,7 @@ class RemoteSyncService: ObservableObject {
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
     @Published var isOnline: Bool = true
+    @Published var dnsProtectionMissing: Bool = false
     @Published var pendingWebsites: [String: String] = [:]
     @Published var pendingApps: [String: RecommendedApp] = [:]
     @Published var displayName: String = ""
@@ -53,30 +54,51 @@ class RemoteSyncService: ObservableObject {
     #if !targetEnvironment(simulator)
     func recheckDNSOnForeground() async {
         guard let uid = Auth.auth().currentUser?.uid,
-              let config = try? await Database.database()
+              let snapshot = try? await Database.database()
                 .reference(withPath: "users/\(uid)/settings")
-                .getData()
-                .value as? [String: Any],
+                .getData(),
+              let config = snapshot.value as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: config),
               let settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data),
               settings.forceDNS else { return }
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
         guard !isEnabled else { return }
-        // DNS was removed — auto-reapply
+
+        // Attempt reapply — iOS may require user consent via a system dialog,
+        // so we verify afterwards whether it actually took effect.
         if settings.dnsAutoReapply {
             await ContentBlockerService.shared.enableForcedDNS(profileID: settings.nextDNSProfileID)
         }
-        // Alert admin
+
+        // Check whether reapply actually succeeded
+        let nowEnabled = await ContentBlockerService.shared.isDNSEnabled()
+
+        // Alert admin with accurate status
         if settings.dnsAlertOnRemoval {
-            let alert = TamperAlert(type: "dns_removed",
-                                   message: "DNS filter was removed and auto-reapplied.",
-                                   timestamp: Date())
+            let message = nowEnabled
+                ? "DNS filter was removed and has been automatically restored."
+                : "DNS filter was removed. Automatic restore failed — the child may have declined the prompt. Manual action required."
+            let alert = TamperAlert(type: "dns_removed", message: message, timestamp: Date())
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .millisecondsSince1970
             if let d = try? encoder.encode(alert),
                let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
                 _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
+        }
+
+        // If still not enabled, show a local notification so the child is prompted
+        if !nowEnabled {
+            let content = UNMutableNotificationContent()
+            content.title = "DNS Protection Disabled"
+            content.body = "Your internet protection has been turned off. Please open B-SAFE to restore it."
+            content.sound = .default
+            let req = UNNotificationRequest(identifier: "bsafe.dns.removed", content: content, trigger: nil)
+            _ = try? await UNUserNotificationCenter.current().add(req)
+            // Publish so ChildDeviceView can show an in-app banner
+            await MainActor.run { self.dnsProtectionMissing = true }
+        } else {
+            await MainActor.run { self.dnsProtectionMissing = false }
         }
     }
     #else
@@ -561,12 +583,23 @@ class RemoteSyncService: ObservableObject {
         guard config.forceDNS, config.dnsAlertOnRemoval || config.dnsAutoReapply else { return }
         #if !targetEnvironment(simulator)
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        guard !isEnabled else { return }
+        guard !isEnabled else {
+            dnsProtectionMissing = false
+            return
+        }
+
+        if config.dnsAutoReapply {
+            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+        }
+
+        let nowEnabled = await ContentBlockerService.shared.isDNSEnabled()
+        dnsProtectionMissing = !nowEnabled
 
         if config.dnsAlertOnRemoval {
-            let alert = TamperAlert(type: "dns_removed",
-                                   message: "DNS filter profile was removed from the device.",
-                                   timestamp: Date())
+            let message = nowEnabled
+                ? "DNS filter was removed and has been automatically restored."
+                : "DNS filter was removed. Automatic restore failed — child may have declined. Manual action required."
+            let alert = TamperAlert(type: "dns_removed", message: message, timestamp: Date())
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .millisecondsSince1970
             if let data = try? encoder.encode(alert),
@@ -575,8 +608,13 @@ class RemoteSyncService: ObservableObject {
             }
         }
 
-        if config.dnsAutoReapply {
-            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+        if !nowEnabled {
+            let content = UNMutableNotificationContent()
+            content.title = "DNS Protection Disabled"
+            content.body = "Your internet protection has been turned off. Please open B-SAFE to restore it."
+            content.sound = .default
+            let req = UNNotificationRequest(identifier: "bsafe.dns.removed", content: content, trigger: nil)
+            _ = try? await UNUserNotificationCenter.current().add(req)
         }
         #endif
     }
