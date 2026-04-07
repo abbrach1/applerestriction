@@ -1407,6 +1407,7 @@ struct SetupChecklistView: View {
 
     @State private var notifStatus: UNAuthorizationStatus = .notDetermined
     @State private var contentBlockerOn = false
+    @State private var networkFilterOn = false
     @State private var isLoading = true
 
     var body: some View {
@@ -1449,6 +1450,21 @@ struct SetupChecklistView: View {
                         actionLabel: "Open Settings"
                     )
 
+                    #if !targetEnvironment(simulator)
+                    ChecklistRow(
+                        title: "Network Filter Active",
+                        detail: "Blocks websites system-wide across all apps",
+                        done: networkFilterOn,
+                        action: networkFilterOn ? nil : {
+                            Task {
+                                await ContentFilterService.shared.enable(config: settingsManager.configuration)
+                                networkFilterOn = await ContentFilterService.shared.isEnabled()
+                            }
+                        },
+                        actionLabel: "Enable"
+                    )
+                    #endif
+
                     ChecklistRow(
                         title: "Connected to Admin",
                         detail: "Real-time sync with admin dashboard",
@@ -1471,10 +1487,11 @@ struct SetupChecklistView: View {
                         authManager.isAuthorized,
                         notifStatus == .authorized || notifStatus == .provisional,
                         contentBlockerOn,
+                        networkFilterOn,
                         syncService.isOnline,
                         !syncService.displayName.isEmpty
                     ].filter { $0 }.count
-                    Text("\(doneCount) of 5 steps complete")
+                    Text("\(doneCount) of 6 steps complete")
                 }
             }
             .navigationTitle("Setup Checklist")
@@ -1498,6 +1515,7 @@ struct SetupChecklistView: View {
         if let state = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: id) {
             contentBlockerOn = state.isEnabled
         }
+        networkFilterOn = await ContentFilterService.shared.isEnabled()
         #endif
     }
 }
