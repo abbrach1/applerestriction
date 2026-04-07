@@ -648,7 +648,7 @@ class RemoteSyncService: ObservableObject {
         guard !email.isEmpty, !apiKey.isEmpty else { return }
         let payload: [String: Any] = [
             "personalizations": [["to": [["email": email]]]],
-            "from": ["email": "noreply@bsafe-alerts.com", "name": "B-SAFE"],
+            "from": ["email": "bsafe.dnslogs@gmail.com", "name": "B-SAFE"],
             "subject": subject,
             "content": [["type": "text/plain", "value": body]]
         ]
