@@ -155,6 +155,54 @@ class NextDNSService {
         _ = try await URLSession.shared.data(for: req)
     }
 
+    // MARK: - Fetch Parental Control State
+
+    /// Fetches the current parental control state from NextDNS (safeSearch, youtubeRestricted, blocked services/categories).
+    func fetchParentalControlState(profileID: String, apiKey: String) async -> (safeSearch: Bool, youtubeRestricted: Bool, services: [String], categories: [String]) {
+        guard let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl") else {
+            return (false, false, [], [])
+        }
+        var req = URLRequest(url: url)
+        req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (false, false, [], [])
+        }
+        let safeSearch = json["safeSearch"] as? Bool ?? false
+        let youtubeRestricted = json["youtubeRestrictedMode"] as? Bool ?? false
+
+        // GET services
+        var services: [String] = []
+        if let servicesURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/services") {
+            var sreq = URLRequest(url: servicesURL)
+            sreq.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+            if let (sdata, _) = try? await URLSession.shared.data(for: sreq),
+               let sjson = try? JSONSerialization.jsonObject(with: sdata) as? [String: Any],
+               let arr = sjson["data"] as? [[String: Any]] {
+                services = arr.compactMap { d -> String? in
+                    guard d["active"] as? Bool == true else { return nil }
+                    return d["id"] as? String
+                }
+            }
+        }
+
+        // GET categories
+        var categories: [String] = []
+        if let catURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/categories") {
+            var creq = URLRequest(url: catURL)
+            creq.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+            if let (cdata, _) = try? await URLSession.shared.data(for: creq),
+               let cjson = try? JSONSerialization.jsonObject(with: cdata) as? [String: Any],
+               let arr = cjson["data"] as? [[String: Any]] {
+                categories = arr.compactMap { d -> String? in
+                    guard d["active"] as? Bool == true else { return nil }
+                    return d["id"] as? String
+                }
+            }
+        }
+        return (safeSearch, youtubeRestricted, services, categories)
+    }
+
     // MARK: - Parental Control
 
     /// Applies SafeSearch, YouTube Restricted Mode, and blocked services/categories

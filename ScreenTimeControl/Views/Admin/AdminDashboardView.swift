@@ -425,8 +425,15 @@ struct AdminDashboardView: View {
     @State private var fcmSaved = false
     @State private var nextDNSApiKey = ""
     @State private var nextDNSSaved = false
+    @State private var alertEmail = ""
+    @State private var alertEmailSaved = false
+    @State private var mainTab = 0
+    @State private var allRequests: [(uid: String, userName: String, type: String, detail: String, pushKey: String, timestamp: Date)] = []
+    @State private var allAlerts: [(uid: String, userName: String, alert: TamperAlert, pushKey: String)] = []
+    @State private var isLoadingGlobal = false
 
     private var onlineCount: Int { vm.users.filter(\.isOnline).count }
+    private var totalPendingCount: Int { allRequests.count }
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     private func userInitials(_ name: String) -> String {
@@ -439,83 +446,38 @@ struct AdminDashboardView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if vm.isLoading {
-                    ProgressView("Loading users...")
-                } else if vm.users.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.2.slash")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("No Users Yet").font(.headline)
-                        Text("Add users in Firebase Console under Authentication.")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    }.padding()
-                } else {
-                    List {
-                        ForEach(vm.users) { user in
-                            NavigationLink {
-                                AdminUserControlView(user: user)
-                                    .environmentObject(auth)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    // Initials avatar
-                                    ZStack {
-                                        Circle()
-                                            .fill(user.isOnline
-                                                  ? Color(red: 0, green: 0.4, blue: 0.15).opacity(0.12)
-                                                  : Color(.systemGray5))
-                                            .frame(width: 44, height: 44)
-                                        Text(userInitials(user.primaryLabel))
-                                            .font(.system(.subheadline, design: .rounded).weight(.bold))
-                                            .foregroundStyle(user.isOnline
-                                                             ? Color(red: 0, green: 0.4, blue: 0.15)
-                                                             : .secondary)
-                                    }
-                                    .overlay(alignment: .bottomTrailing) {
-                                        Circle()
-                                            .fill(user.isOnline ? .green : Color(.systemGray4))
-                                            .frame(width: 11, height: 11)
-                                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
-                                    }
+            VStack(spacing: 0) {
+                // Main tab segmented control
+                Picker("View", selection: $mainTab) {
+                    Text("Users").tag(0)
+                    Text("Requests").tag(1)
+                    Text("Alerts").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal).padding(.vertical, 8)
+                .overlay(alignment: .topTrailing) {
+                    if totalPendingCount > 0 {
+                        Text("\(totalPendingCount)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(.red, in: Capsule())
+                            .offset(x: -16, y: 4)
+                    }
+                }
 
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(user.primaryLabel)
-                                            .font(.subheadline).fontWeight(.semibold)
-                                        Text(user.deviceName.isEmpty ? user.secondaryLabel : user.deviceName)
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if user.isOnline {
-                                        Text("Online")
-                                            .font(.caption2).fontWeight(.medium)
-                                            .foregroundStyle(.green)
-                                            .padding(.horizontal, 8).padding(.vertical, 3)
-                                            .background(Color.green.opacity(0.1), in: Capsule())
-                                    } else if !user.lastSeen.isEmpty {
-                                        Text(relativeLastSeen(user.lastSeen))
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        let token = await auth.freshToken() ?? ""
-                                        await vm.deleteUser(uid: user.uid, idToken: token)
-                                        let refreshToken = await auth.freshToken() ?? ""
-                                        await vm.loadUsers(idToken: refreshToken)
-                                    }
-                                } label: {
-                                    Label("Remove", systemImage: "trash")
-                                }
-                            }
-                        }
+                Group {
+                    if mainTab == 0 {
+                        usersListView
+                    } else if mainTab == 1 {
+                        globalRequestsView
+                    } else {
+                        globalAlertsView
                     }
                 }
             }
             .navigationTitle("B-SAFE Admin")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 10) {
@@ -618,6 +580,53 @@ struct AdminDashboardView: View {
                             .disabled(fcmServerKey.isEmpty && nextDNSApiKey.isEmpty)
                         }
 
+                        Section {
+                            TextField("Alert Email", text: $alertEmail)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.emailAddress)
+                        } header: {
+                            Text("Email Alerts")
+                        } footer: {
+                            Text("Receive email alerts when DNS protection is removed or restored. Requires a SendGrid API key set in Firebase under adminConfig/sendGridApiKey.")
+                                .font(.caption)
+                        }
+
+                        Section {
+                            Button {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    let trimmed = alertEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !trimmed.isEmpty {
+                                        UserDefaults.standard.set(trimmed, forKey: "bsafe.alertEmail")
+                                        if let url = URL(string: "\(dbURL)/adminConfig/alertEmail.json?auth=\(token)") {
+                                            var req = URLRequest(url: url)
+                                            req.httpMethod = "PUT"
+                                            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                                            req.httpBody = "\"\(trimmed)\"".data(using: .utf8)
+                                            _ = try? await URLSession.shared.data(for: req)
+                                        }
+                                    }
+                                    alertEmailSaved = true
+                                    _ = try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    alertEmailSaved = false
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: alertEmailSaved ? "checkmark.circle.fill" : "envelope.fill")
+                                    Text(alertEmailSaved ? "Saved!" : "Save Alert Email")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(alertEmailSaved ? Color.green : Color(red: 0, green: 0.4, blue: 0.15))
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .disabled(alertEmail.isEmpty)
+                        }
+
                         Section("About FCM Token") {
                             Text("Your device's FCM token is automatically registered when you open the admin dashboard. No extra steps needed — just enter the server key above.")
                                 .font(.caption)
@@ -641,6 +650,9 @@ struct AdminDashboardView: View {
                 if let local = UserDefaults.standard.string(forKey: "bsafe.nextDNSApiKey"), !local.isEmpty {
                     nextDNSApiKey = local
                 }
+                if let local = UserDefaults.standard.string(forKey: "bsafe.alertEmail"), !local.isEmpty {
+                    alertEmail = local
+                }
                 let token = await auth.freshToken() ?? ""
                 await vm.loadUsers(idToken: token)
                 // Then refresh from Firebase (may be newer)
@@ -658,8 +670,252 @@ struct AdminDashboardView: View {
                     nextDNSApiKey = key
                     UserDefaults.standard.set(key, forKey: "bsafe.nextDNSApiKey")
                 }
+                if let url = URL(string: "\(dbURL)/adminConfig/alertEmail.json?auth=\(token)"),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
+                   let key = try? JSONDecoder().decode(String.self, from: data),
+                   !key.isEmpty {
+                    alertEmail = key
+                    UserDefaults.standard.set(key, forKey: "bsafe.alertEmail")
+                }
+                await loadAllRequestsAndAlerts()
             }
         }
+    }
+
+    // MARK: - Users List Sub-View
+
+    @ViewBuilder
+    private var usersListView: some View {
+        Group {
+            if vm.isLoading {
+                ProgressView("Loading users...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.users.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "person.2.slash")
+                        .font(.system(size: 48)).foregroundStyle(.secondary)
+                    Text("No Users Yet").font(.headline)
+                    Text("Add users in Firebase Console under Authentication.")
+                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }.padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(vm.users) { user in
+                        NavigationLink {
+                            AdminUserControlView(user: user)
+                                .environmentObject(auth)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(user.isOnline
+                                              ? Color(red: 0, green: 0.4, blue: 0.15).opacity(0.12)
+                                              : Color(.systemGray5))
+                                        .frame(width: 44, height: 44)
+                                    Text(userInitials(user.primaryLabel))
+                                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                        .foregroundStyle(user.isOnline
+                                                         ? Color(red: 0, green: 0.4, blue: 0.15)
+                                                         : .secondary)
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    Circle()
+                                        .fill(user.isOnline ? .green : Color(.systemGray4))
+                                        .frame(width: 11, height: 11)
+                                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(user.primaryLabel)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                    Text(user.deviceName.isEmpty ? user.secondaryLabel : user.deviceName)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if user.isOnline {
+                                    Text("Online")
+                                        .font(.caption2).fontWeight(.medium)
+                                        .foregroundStyle(.green)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Color.green.opacity(0.1), in: Capsule())
+                                } else if !user.lastSeen.isEmpty {
+                                    Text(relativeLastSeen(user.lastSeen))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task {
+                                    let token = await auth.freshToken() ?? ""
+                                    await vm.deleteUser(uid: user.uid, idToken: token)
+                                    let refreshToken = await auth.freshToken() ?? ""
+                                    await vm.loadUsers(idToken: refreshToken)
+                                }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Global Requests Sub-View
+
+    @ViewBuilder
+    private var globalRequestsView: some View {
+        Group {
+            if isLoadingGlobal {
+                ProgressView("Loading requests...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if allRequests.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 52)).foregroundStyle(.green)
+                    Text("No Pending Requests")
+                        .font(.headline)
+                    Text("Unlock and website requests from all users appear here.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal, 32)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(allRequests, id: \.pushKey) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Image(systemName: item.type == "unlock" ? "lock.open.fill" : "globe.badge.exclamationmark")
+                                    .foregroundStyle(item.type == "unlock" ? .orange : .blue)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.detail).font(.subheadline).fontWeight(.semibold)
+                                    Text(item.userName).font(.caption).foregroundStyle(.secondary)
+                                    Text(item.timestamp.formatted(.relative(presentation: .named)))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .refreshable { await loadAllRequestsAndAlerts() }
+    }
+
+    // MARK: - Global Alerts Sub-View
+
+    @ViewBuilder
+    private var globalAlertsView: some View {
+        Group {
+            if isLoadingGlobal {
+                ProgressView("Loading alerts...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if allAlerts.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "shield.checkered")
+                        .font(.system(size: 52)).foregroundStyle(.green)
+                    Text("No Active Alerts")
+                        .font(.headline)
+                    Text("Tamper alerts from all users appear here.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal, 32)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(allAlerts, id: \.pushKey) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.alert.message).font(.subheadline).fontWeight(.medium).lineLimit(2)
+                                    Text(item.userName).font(.caption).foregroundStyle(.secondary)
+                                    Text(item.alert.timestamp.formatted(.relative(presentation: .named)))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .refreshable { await loadAllRequestsAndAlerts() }
+    }
+
+    // MARK: - Load All Requests and Alerts
+
+    private func loadAllRequestsAndAlerts() async {
+        guard !vm.users.isEmpty else { return }
+        isLoadingGlobal = true
+        let token = await auth.freshToken() ?? ""
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .millisecondsSince1970
+
+        var requests: [(uid: String, userName: String, type: String, detail: String, pushKey: String, timestamp: Date)] = []
+        var alerts: [(uid: String, userName: String, alert: TamperAlert, pushKey: String)] = []
+
+        await withTaskGroup(of: Void.self) { group in
+            for user in vm.users {
+                group.addTask {
+                    // Unlock requests
+                    if let url = URL(string: "\(dbURL)/users/\(user.uid)/unlockRequests.json?auth=\(token)"),
+                       let (data, _) = try? await URLSession.shared.data(from: url),
+                       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        for (key, val) in dict {
+                            if let d = try? JSONSerialization.data(withJSONObject: val),
+                               let req = try? dec.decode(UnlockRequest.self, from: d) {
+                                await MainActor.run {
+                                    requests.append((uid: user.uid, userName: user.primaryLabel,
+                                                    type: "unlock",
+                                                    detail: req.reason.isEmpty ? "Unlock request" : req.reason,
+                                                    pushKey: key,
+                                                    timestamp: req.timestamp))
+                                }
+                            }
+                        }
+                    }
+                    // Website requests
+                    if let url = URL(string: "\(dbURL)/users/\(user.uid)/websiteRequests.json?auth=\(token)"),
+                       let (data, _) = try? await URLSession.shared.data(from: url),
+                       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        for (key, val) in dict {
+                            if let d = try? JSONSerialization.data(withJSONObject: val),
+                               let req = try? dec.decode(WebsiteRequest.self, from: d) {
+                                await MainActor.run {
+                                    requests.append((uid: user.uid, userName: user.primaryLabel,
+                                                    type: "website",
+                                                    detail: req.domain,
+                                                    pushKey: key,
+                                                    timestamp: req.timestamp))
+                                }
+                            }
+                        }
+                    }
+                    // Tamper alerts
+                    if let url = URL(string: "\(dbURL)/users/\(user.uid)/tamperAlerts.json?auth=\(token)"),
+                       let (data, _) = try? await URLSession.shared.data(from: url),
+                       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        for (key, val) in dict {
+                            if let d = try? JSONSerialization.data(withJSONObject: val),
+                               let alert = try? dec.decode(TamperAlert.self, from: d),
+                               !alert.dismissed {
+                                await MainActor.run {
+                                    alerts.append((uid: user.uid, userName: user.primaryLabel, alert: alert, pushKey: key))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        allRequests = requests.sorted { $0.timestamp > $1.timestamp }
+        allAlerts = alerts.sorted { $0.alert.timestamp > $1.alert.timestamp }
+        isLoadingGlobal = false
     }
 
     private func saveNextDNSApiKey(token: String) async {
@@ -709,7 +965,7 @@ struct AdminUserControlView: View {
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
     @StateObject private var vm = AdminUserViewModel()
-    @State private var selectedTab = 0
+    @State private var selectedTab: Int = 0
     @State private var nextDNSApiKey = ""
 
     var body: some View {
@@ -782,13 +1038,13 @@ struct AdminUserControlView: View {
 
             // Scrollable tab picker (7 tabs)
             let tabs: [(Int, String, String)] = [
-                (0, "bell.badge.fill",                  "Requests"),
-                (1, "globe",                            "Websites"),
+                (0, "globe",                            "Websites"),
+                (1, "network.badge.shield.half.filled", "DNS"),
                 (2, "moon.fill",                        "Downtime"),
                 (3, "square.grid.2x2.fill",             "Apps"),
                 (4, "bolt.fill",                        "Commands"),
-                (5, "network.badge.shield.half.filled", "DNS"),
-                (6, "info.circle.fill",                 "Info"),
+                (5, "info.circle.fill",                 "Info"),
+                (6, "bell.badge.fill",                  "Requests"),
             ]
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
@@ -813,7 +1069,7 @@ struct AdminUserControlView: View {
                             )
                         }
                         .overlay(alignment: .topTrailing) {
-                            if tag == 0 && vm.pendingRequestCount > 0 {
+                            if tag == 6 && vm.pendingRequestCount > 0 {
                                 Text("\(vm.pendingRequestCount)")
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(.white)
@@ -835,13 +1091,13 @@ struct AdminUserControlView: View {
                 Spacer()
             } else {
                 TabView(selection: $selectedTab) {
-                    RequestsTab(vm: vm, user: user).tag(0)
-                    WebsiteTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(1)
+                    WebsiteTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(0)
+                    DNSTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(1)
                     DowntimeTab(vm: vm, user: user).tag(2)
                     AppsTab(vm: vm, user: user).tag(3)
                     CommandsTab(vm: vm, user: user).tag(4)
-                    DNSTab(vm: vm, user: user, globalApiKey: nextDNSApiKey).tag(5)
-                    InfoTab(user: user).tag(6)
+                    InfoTab(user: user).tag(5)
+                    RequestsTab(vm: vm, user: user).tag(6)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
@@ -980,6 +1236,7 @@ struct InfoTab: View {
     @EnvironmentObject var auth: FirebaseAuthService
     @State private var info: [String: Any] = [:]
     @State private var isLoading = true
+    @State private var filterLogs: [(host: String, allowed: Bool, reason: String, timestamp: Date)] = []
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     var body: some View {
@@ -1043,13 +1300,24 @@ struct InfoTab: View {
 
                     Section("Connectivity") {
                         HStack {
-                            Circle().fill(user.isOnline ? .green : Color(.systemGray4)).frame(width: 8, height: 8)
-                            Text(user.isOnline ? "Online" : "Offline")
-                                .foregroundStyle(user.isOnline ? .green : .secondary)
-                            Spacer()
-                            if !user.lastSeen.isEmpty {
-                                Text(relativeLastSeen(user.lastSeen))
-                                    .font(.caption).foregroundStyle(.secondary)
+                            let isOnlineFromDB = info["isOnline"] as? Bool ?? false
+                            let lastSeenMS = info["lastSeen"] as? Double ?? 0
+                            let lastSeenDate = lastSeenMS > 0 ? Date(timeIntervalSince1970: lastSeenMS / 1000) : nil
+                            let recentlyOnline = lastSeenDate.map { -$0.timeIntervalSinceNow < 300 } ?? false
+                            let showOnline = isOnlineFromDB && recentlyOnline
+
+                            Circle()
+                                .fill(showOnline ? Color.green : Color(.systemGray4))
+                                .frame(width: 8, height: 8)
+                            if showOnline {
+                                Text("Online")
+                                    .foregroundStyle(.green)
+                            } else if let lsd = lastSeenDate {
+                                Text("Last seen \(relativeDate(lsd))")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Offline")
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -1057,6 +1325,30 @@ struct InfoTab: View {
                     Section("Account") {
                         infoRow("Email",   value: user.email,                                            icon: "envelope.fill",         color: .blue)
                         infoRow("User ID", value: String(user.uid.prefix(14)) + "…",                    icon: "person.badge.key.fill",  color: .secondary)
+                    }
+
+                    // Filter Logs from child device
+                    if !filterLogs.isEmpty {
+                        Section {
+                            ForEach(Array(filterLogs.prefix(50).enumerated()), id: \.offset) { _, entry in
+                                HStack(spacing: 8) {
+                                    Image(systemName: entry.allowed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .foregroundStyle(entry.allowed ? .green : .red).frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(entry.host).font(.caption).lineLimit(1)
+                                        Text(entry.reason).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(entry.timestamp.formatted(.relative(presentation: .named)))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        } header: {
+                            Text("Content Filter Logs (\(filterLogs.count))")
+                        } footer: {
+                            Text("Uploaded from the child's device via Filter Logs in B-SAFE.")
+                                .font(.caption)
+                        }
                     }
                 }
             }
@@ -1089,12 +1381,27 @@ struct InfoTab: View {
     private func loadInfo() async {
         isLoading = true
         let token = await auth.freshToken() ?? ""
-        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/info.json?auth=\(token)"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            isLoading = false; return
+        async let infoFetch: (Data, URLResponse)? = {
+            guard let url = URL(string: "\(dbURL)/users/\(user.uid)/info.json?auth=\(token)") else { return nil }
+            return try? await URLSession.shared.data(from: url)
+        }()
+        async let logsFetch: (Data, URLResponse)? = {
+            guard let url = URL(string: "\(dbURL)/users/\(user.uid)/filterLogs.json?auth=\(token)") else { return nil }
+            return try? await URLSession.shared.data(from: url)
+        }()
+        if let (data, _) = await infoFetch,
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            info = dict
         }
-        info = dict
+        if let (data, _) = await logsFetch,
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            filterLogs = arr.compactMap { d -> (host: String, allowed: Bool, reason: String, timestamp: Date)? in
+                guard let host = d["host"] as? String,
+                      let allowed = d["allowed"] as? Bool,
+                      let ts = d["timestamp"] as? Double else { return nil }
+                return (host, allowed, d["reason"] as? String ?? "", Date(timeIntervalSince1970: ts / 1000))
+            }.sorted { $0.timestamp > $1.timestamp }
+        }
         isLoading = false
     }
 }
@@ -1113,34 +1420,7 @@ struct WebsiteTab: View {
 
     var body: some View {
         List {
-            // Child device setup status
-            if let info = vm.websiteSetupInfo {
-                Section {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.green.opacity(0.12))
-                                .frame(width: 40, height: 40)
-                            Image(systemName: "checkmark.shield.fill")
-                                .foregroundStyle(.green)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Device whitelist configured")
-                                .font(.subheadline).fontWeight(.medium)
-                            Text("\(info.siteCount) site\(info.siteCount == 1 ? "" : "s") · \(info.categoryCount) categories")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text(info.timestamp.formatted(.relative(presentation: .named)))
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                } header: {
-                    Text("Child Device Setup")
-                } footer: {
-                    Text("Child ran Website Whitelist Setup on their device. Switching to 'Allow Only Listed Sites' will allow exactly those sites.")
-                }
-            }
-
+            // 1. Filter Mode (top)
             Section {
                 Picker("Filter Mode", selection: $vm.config.websiteFilterMode) {
                     Text("Block Listed Sites").tag(WebFilterMode.blacklist)
@@ -1149,7 +1429,7 @@ struct WebsiteTab: View {
                 .pickerStyle(.segmented)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             } header: {
-                Text("Mode")
+                Text("Filter Mode")
             } footer: {
                 if vm.config.websiteFilterMode == .blacklist {
                     Text("Blacklist: listed sites are blocked. Empty list = unrestricted browsing.")
@@ -1163,58 +1443,7 @@ struct WebsiteTab: View {
                 }
             }
 
-            // DNS Settings — prominently placed so they're easy to find
-            Section {
-                Toggle(isOn: $vm.config.forceDNS) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Force NextDNS")
-                                .font(.subheadline).fontWeight(.medium)
-                            Text("Blocks domains system-wide across all apps, not just Safari")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
-                    }
-                }
-
-                if vm.config.forceDNS {
-                    HStack {
-                        Image(systemName: "person.badge.key.fill").foregroundStyle(.purple).frame(width: 28)
-                        TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
-                    }
-                    Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Alert Me If Removed").font(.subheadline).fontWeight(.medium)
-                                Text("Sends a tamper alert if the child removes the DNS profile")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } icon: { Image(systemName: "bell.badge.fill").foregroundStyle(.orange) }
-                    }
-                    Toggle(isOn: $vm.config.dnsAutoReapply) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Auto Re-Apply If Removed").font(.subheadline).fontWeight(.medium)
-                                Text("Attempts to reinstall the profile automatically (child must approve)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } icon: { Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green) }
-                    }
-                }
-            } header: {
-                Text("DNS Filter")
-            } footer: {
-                if vm.config.forceDNS {
-                    Text("Find your Profile ID at nextdns.io → your profile → Setup.")
-                        .font(.caption)
-                } else {
-                    Text("NextDNS blocks domains system-wide across all apps. Toggle on to configure.")
-                        .font(.caption)
-                }
-            }
-
+            // 2. Site list (Blocked or Allowed based on mode)
             if vm.config.websiteFilterMode == .blacklist {
                 Section("Blocked Sites") {
                     ForEach(vm.config.blockedWebsites, id: \.self) { domain in
@@ -1281,7 +1510,7 @@ struct WebsiteTab: View {
                 }
             }
 
-            // Block a specific website immediately
+            // 3. Quick Block
             Section {
                 HStack {
                     TextField("domain (e.g. tiktok.com)", text: $newPendingDomain)
@@ -1302,24 +1531,7 @@ struct WebsiteTab: View {
                 Text("Adds the domain to the blocked list and applies it immediately — no action needed from the child.")
             }
 
-            Section {
-                Toggle(isOn: $vm.config.browserEnabled) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("B-SAFE Browser")
-                                .font(.subheadline).fontWeight(.medium)
-                            Text("Show the built-in browser tab on the child's device")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "globe.badge.checkmark").foregroundStyle(.green)
-                    }
-                }
-            } header: { Text("Browser") } footer: {
-                Text("When enabled, the child can browse only the allowed sites using the B-SAFE Browser. Disable to remove the browser tab entirely.")
-                    .font(.caption)
-            }
-
+            // 4. Safari Content Blocker
             Section {
                 Toggle(isOn: $vm.config.contentBlockerEnabled) {
                     Label {
@@ -1333,8 +1545,24 @@ struct WebsiteTab: View {
                         Image(systemName: "safari.fill").foregroundStyle(.blue)
                     }
                 }
-            } header: { Text("Extra Protection") }
+                Toggle(isOn: $vm.config.browserEnabled) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("B-SAFE Browser")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Show the built-in browser tab on the child's device")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "globe.badge.checkmark").foregroundStyle(.green)
+                    }
+                }
+            } header: { Text("Browser & Protection") } footer: {
+                Text("Safari Content Blocker enforces the domain list in Safari. B-SAFE Browser restricts browsing to allowed sites only.")
+                    .font(.caption)
+            }
 
+            // 5. Apply Website Settings
             Section {
                 ApplyButton(label: "Apply Website Settings",
                             icon: "globe",
@@ -1364,6 +1592,35 @@ struct WebsiteTab: View {
                 let effectiveKey = globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
                 if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !effectiveKey.isEmpty {
                     NextDNSSyncStatusRow(vm: vm, globalApiKey: effectiveKey)
+                }
+            }
+
+            // 6. Child Device Setup Status (bottom, secondary)
+            if let info = vm.websiteSetupInfo {
+                Section {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "checkmark.shield.fill")
+                                .foregroundStyle(.green).font(.subheadline)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Device whitelist configured")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("\(info.siteCount) sites · \(info.categoryCount) categories")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(info.timestamp.formatted(.relative(presentation: .named)))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("Child Device Setup")
+                } footer: {
+                    Text("Child ran Website Whitelist Setup on their device.")
+                        .font(.caption)
                 }
             }
         }
@@ -1489,6 +1746,31 @@ struct DowntimeTab: View {
                         let token = await auth.freshToken() ?? ""
                         await vm.saveAndSendCommand(.updateDowntime, uid: user.uid, idToken: token, section: "downtime")
                     }
+                }
+
+                if vm.config.downtimeEnabled {
+                    Button(role: .destructive) {
+                        vm.config.downtimeEnabled = false
+                        vm.config.downtimeSchedule.activeDays = Set(1...7)
+                        Task {
+                            let token = await auth.freshToken() ?? ""
+                            await vm.saveAndSendCommand(.updateDowntime, uid: user.uid, idToken: token, section: "downtime")
+                        }
+                    } label: {
+                        Label("Clear Downtime Schedule", systemImage: "xmark.circle")
+                            .foregroundStyle(.red)
+                    }
+                }
+            } footer: {
+                if vm.config.downtimeEnabled {
+                    let s = vm.config.downtimeSchedule
+                    let fmt: (Int, Int) -> String = { h, m in
+                        let c = DateComponents(hour: h, minute: m)
+                        let d = Calendar.current.date(from: c) ?? Date()
+                        return d.formatted(date: .omitted, time: .shortened)
+                    }
+                    Text("Active: \(fmt(s.startHour, s.startMinute)) – \(fmt(s.endHour, s.endMinute))")
+                        .font(.caption)
                 }
             }
         }
@@ -1705,21 +1987,6 @@ struct AppsTab: View {
                 Text("All apps are allowed by default. Selected apps will show a blocking screen on the device. Note: this picker shows your device's apps — use the child-side Admin Setup to pick from the child's installed apps.")
             }
 
-            Section("Emergency Lock") {
-                Toggle(isOn: $vm.config.isLocked) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Block ALL Apps")
-                                .font(.subheadline).fontWeight(.medium)
-                            Text("Overrides individual selections")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "lock.fill").foregroundStyle(.red)
-                    }
-                }
-            }
-
             Section {
                 ApplyButton(label: "Apply App Settings",
                             icon: "checkmark.shield.fill",
@@ -1737,20 +2004,30 @@ struct AppsTab: View {
         #if !targetEnvironment(simulator)
         .sheet(isPresented: $showingPicker) {
             NavigationStack {
-                FamilyActivityPicker(selection: $vm.appSelection)
-                    .navigationTitle("Select Apps to Block")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") {
-                                vm.serializeAppSelection()
-                                showingPicker = false
-                            }
-                        }
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showingPicker = false }
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle").foregroundStyle(.blue)
+                        Text("This picker uses YOUR device's apps. For the child's apps, use the app list submitted by the child below.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                    .background(Color.blue.opacity(0.05))
+
+                    FamilyActivityPicker(selection: $vm.appSelection)
+                }
+                .navigationTitle("Select Apps to Block")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            vm.serializeAppSelection()
+                            showingPicker = false
                         }
                     }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showingPicker = false }
+                    }
+                }
             }
         }
         #endif
@@ -2003,6 +2280,50 @@ struct CommandsTab: View {
 
     var body: some View {
         List {
+            // Device Lock section
+            Section {
+                Toggle(isOn: $vm.config.isLocked) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Block ALL Apps")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Overrides individual app selections")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "lock.fill").foregroundStyle(.red)
+                    }
+                }
+
+                Button {
+                    Task {
+                        let token = await auth.freshToken() ?? ""
+                        await vm.saveAndSendCommand(
+                            vm.config.isLocked ? .lockDevice : .updateBlockedApps,
+                            uid: user.uid, idToken: token, section: "lock")
+                    }
+                } label: {
+                    HStack {
+                        if vm.isSaving && vm.savedSection == "lock" { ProgressView().tint(.white) }
+                        else { Image(systemName: vm.savedSection == "lock" ? "checkmark.circle.fill" : "lock.fill") }
+                        Text(vm.savedSection == "lock" ? "Applied!" : "Apply")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(vm.savedSection == "lock" ? Color.green : Color.red)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(vm.isSaving)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            } header: {
+                Text("Device Lock")
+            } footer: {
+                Text("When enabled, ALL apps are blocked regardless of individual app selections. Toggle off and Apply to restore access.")
+            }
+
             // Send Notification
             Section {
                 TextField("Title (optional)", text: $notifTitle)
@@ -2143,23 +2464,74 @@ struct DNSTab: View {
     private var isConfigured: Bool { !profileID.isEmpty && !effectiveApiKey.isEmpty }
 
     var body: some View {
-        if !isConfigured {
-            VStack(spacing: 16) {
-                Image(systemName: "network.badge.shield.half.filled")
-                    .font(.system(size: 48)).foregroundStyle(.secondary)
-                Text("NextDNS Not Configured")
-                    .font(.headline)
-                Text("Go to the Websites tab → DNS Filter and enter a Profile ID and API Key to enable DNS logs and filtering.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                Button("Go to DNS Settings") { /* handled by tab switch */ }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color(red: 0, green: 0.4, blue: 0.15))
+        VStack(spacing: 0) {
+            // DNS Configuration section (always visible at top)
+            List {
+                Section {
+                    Toggle(isOn: $vm.config.forceDNS) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Force NextDNS")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Blocks domains system-wide across all apps, not just Safari")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
+                        }
+                    }
+
+                    if vm.config.forceDNS {
+                        HStack {
+                            Image(systemName: "person.badge.key.fill").foregroundStyle(.purple).frame(width: 28)
+                            TextField("NextDNS Profile ID (e.g. abc123)", text: $vm.config.nextDNSProfileID)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never).font(.subheadline)
+                        }
+                        Toggle(isOn: $vm.config.dnsAlertOnRemoval) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Alert Me If Removed").font(.subheadline).fontWeight(.medium)
+                                    Text("Sends a tamper alert if the child removes the DNS profile")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "bell.badge.fill").foregroundStyle(.orange) }
+                        }
+                        Toggle(isOn: $vm.config.dnsAutoReapply) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Auto Re-Apply If Removed").font(.subheadline).fontWeight(.medium)
+                                    Text("Attempts to reinstall the profile automatically (child must approve)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green) }
+                        }
+                    }
+                } header: {
+                    Text("Configuration")
+                } footer: {
+                    if vm.config.forceDNS {
+                        Text("Find your Profile ID at nextdns.io → your profile → Setup.")
+                            .font(.caption)
+                    } else {
+                        Text("NextDNS blocks domains system-wide across all apps. Toggle on to configure.")
+                            .font(.caption)
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        } else {
+            .frame(maxHeight: vm.config.forceDNS ? 340 : 100)
+
+            if !isConfigured {
+                VStack(spacing: 16) {
+                    Image(systemName: "network.badge.shield.half.filled")
+                        .font(.system(size: 40)).foregroundStyle(.secondary)
+                    Text("Enter a Profile ID above to view DNS logs and filtering.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
             VStack(spacing: 0) {
                 // Segmented: Logs | Allow | Block | Safety
                 Picker("DNS Section", selection: $selectedSection) {
@@ -2190,7 +2562,8 @@ struct DNSTab: View {
                 if selectedSection != 3 { Task { await reload() } }
             }
             .onDisappear { stopAutoRefresh() }
-        }
+            } // end if isConfigured
+        } // end outer VStack
     }
 
     private func startAutoRefresh() {
@@ -2274,6 +2647,11 @@ struct DNSTab: View {
                     }
                 }
                 .listStyle(.plain)
+
+                Text("\(logs.filter(\.blocked).count) blocked · \(logs.filter { !$0.blocked }.count) allowed · \(logs.count) total")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding()
             }
         }
         .toolbar {
@@ -2347,7 +2725,14 @@ struct DNSTab: View {
         async let l = NextDNSService.shared.fetchLogs(profileID: profileID, apiKey: effectiveApiKey)
         async let a = NextDNSService.shared.fetchList("allowlist", profileID: profileID, apiKey: effectiveApiKey)
         async let b = NextDNSService.shared.fetchList("denylist",  profileID: profileID, apiKey: effectiveApiKey)
-        (logs, allowList, blockList) = await (l, a, b)
+        async let pc = NextDNSService.shared.fetchParentalControlState(profileID: profileID, apiKey: effectiveApiKey)
+        let (l2, a2, b2, pcState) = await (l, a, b, pc)
+        logs = l2; allowList = a2; blockList = b2
+        // Update vm config with fresh parental control state
+        vm.config.safeSearchEnabled = pcState.safeSearch
+        vm.config.youtubeRestrictedEnabled = pcState.youtubeRestricted
+        vm.config.blockedDNSServices = pcState.services
+        vm.config.blockedDNSCategories = pcState.categories
         isLoading = false
     }
 
@@ -2359,7 +2744,7 @@ struct DNSTab: View {
                 Section {
                     HStack(spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Text("Enable \"Force NextDNS\" in the Websites tab → DNS Filter for safety settings to take effect.")
+                        Text("Enable \"Force NextDNS\" at the top of this tab for safety settings to take effect.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -2593,8 +2978,12 @@ struct CommandRow: View {
 
 private func relativeLastSeen(_ iso: String) -> String {
     guard let date = ISO8601DateFormatter().date(from: iso) else { return "Offline" }
+    return relativeDate(date)
+}
+
+private func relativeDate(_ date: Date) -> String {
     let mins = Int(-date.timeIntervalSinceNow / 60)
-    if mins < 2  { return "Just now" }
+    if mins < 2  { return "just now" }
     if mins < 60 { return "\(mins)m ago" }
     let hrs = mins / 60
     if hrs < 24  { return "\(hrs)h ago" }

@@ -85,6 +85,10 @@ class RemoteSyncService: ObservableObject {
                let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
                 _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
+            await sendEmailAlert(
+                subject: "B-SAFE: DNS Protection Alert",
+                body: "Device: \(UIDevice.current.name)\n\(message)"
+            )
         }
 
         // If still not enabled, show a local notification so the child is prompted
@@ -606,6 +610,10 @@ class RemoteSyncService: ObservableObject {
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
+            await sendEmailAlert(
+                subject: "B-SAFE: DNS Protection Alert",
+                body: "Device: \(UIDevice.current.name)\n\(message)"
+            )
         }
 
         if !nowEnabled {
@@ -617,6 +625,30 @@ class RemoteSyncService: ObservableObject {
             _ = try? await UNUserNotificationCenter.current().add(req)
         }
         #endif
+    }
+
+    // MARK: - Email Alert
+
+    private func sendEmailAlert(subject: String, body: String) async {
+        let email = UserDefaults.standard.string(forKey: "bsafe.alertEmail") ?? ""
+        let apiKey = UserDefaults.standard.string(forKey: "bsafe.sendGridApiKey") ?? ""
+        guard !email.isEmpty else { return }
+        guard !apiKey.isEmpty else { return }
+
+        let payload: [String: Any] = [
+            "personalizations": [["to": [["email": email]]]],
+            "from": ["email": "noreply@bsafe-app.com", "name": "B-SAFE"],
+            "subject": subject,
+            "content": [["type": "text/plain", "value": body]]
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let url = URL(string: "https://api.sendgrid.com/v3/mail/send") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     // MARK: - Legacy Polling Stubs (kept so call sites compile)

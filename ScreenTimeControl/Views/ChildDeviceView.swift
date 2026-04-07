@@ -27,6 +27,7 @@ struct ChildDeviceView: View {
     @State private var bypassCode = ""
     @State private var showBypassResultAlert = false
     @State private var bypassSuccess = false
+    @State private var showFilterLogs = false
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -361,9 +362,18 @@ struct ChildDeviceView: View {
                 showChecklist = true
             }
             Divider().padding(.leading, 52)
+            Divider().padding(.leading, 52)
+            menuRow(icon: "line.3.horizontal.decrease.circle", label: "Filter Logs", color: .indigo) {
+                showFilterLogs = true
+            }
+            Divider().padding(.leading, 52)
             menuRow(icon: "rectangle.portrait.and.arrow.right", label: "Sign Out", color: .red) {
                 auth.signOut()
             }
+        }
+        .sheet(isPresented: $showFilterLogs) {
+            FilterLogsView()
+                .environmentObject(auth)
         }
         .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator), lineWidth: 0.5))
@@ -1520,6 +1530,111 @@ struct SetupChecklistView: View {
         }
         networkFilterOn = await ContentFilterService.shared.isEnabled()
         #endif
+    }
+}
+
+// MARK: - Filter Logs View
+
+struct FilterLogsView: View {
+    @EnvironmentObject var auth: FirebaseAuthService
+    @State private var logs: [(host: String, allowed: Bool, reason: String, timestamp: Date)] = []
+    @State private var isUploading = false
+    @State private var uploadDone = false
+    private let appGroupID = "group.com.abbrachfeld.bsafe"
+    private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if logs.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 44)).foregroundStyle(.secondary)
+                        Text("No Filter Logs").font(.headline)
+                        Text("Network filter decisions will appear here once the filter is active.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section {
+                            Text("\(logs.filter { $0.allowed }.count) allowed · \(logs.filter { !$0.allowed }.count) blocked · \(logs.count) total")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+
+                        Section("Recent Decisions") {
+                            ForEach(Array(logs.prefix(100).enumerated()), id: \.offset) { _, entry in
+                                HStack(spacing: 10) {
+                                    Image(systemName: entry.allowed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .foregroundStyle(entry.allowed ? .green : .red)
+                                        .frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.host).font(.subheadline).lineLimit(1)
+                                        Text(entry.reason).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(entry.timestamp.formatted(.relative(presentation: .named)))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Filter Logs")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Task { await uploadLogs() }
+                    } label: {
+                        if isUploading { ProgressView().scaleEffect(0.8) }
+                        else if uploadDone { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                        else { Text("Send to Admin") }
+                    }
+                    .disabled(isUploading || logs.isEmpty)
+                }
+            }
+        }
+        .onAppear { loadLogs() }
+    }
+
+    private func loadLogs() {
+        guard let defaults = UserDefaults(suiteName: appGroupID),
+              let raw = defaults.array(forKey: "bsafe.filter.logs") as? [[String: Any]] else { return }
+        logs = raw.compactMap { d -> (host: String, allowed: Bool, reason: String, timestamp: Date)? in
+            guard let host = d["host"] as? String,
+                  let allowed = d["allowed"] as? Bool,
+                  let ts = d["timestamp"] as? Double else { return nil }
+            let reason = d["reason"] as? String ?? ""
+            return (host, allowed, reason, Date(timeIntervalSince1970: ts))
+        }.sorted { $0.timestamp > $1.timestamp }
+    }
+
+    private func uploadLogs() async {
+        guard !logs.isEmpty else { return }
+        isUploading = true
+        let token = await auth.freshToken() ?? ""
+        guard let uid = auth.currentUser?.uid else { isUploading = false; return }
+
+        let payload: [[String: Any]] = logs.map { entry in
+            ["host": entry.host, "allowed": entry.allowed, "reason": entry.reason,
+             "timestamp": entry.timestamp.timeIntervalSince1970 * 1000]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let url = URL(string: "\(dbURL)/users/\(uid)/filterLogs.json?auth=\(token)") else {
+            isUploading = false; return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        _ = try? await URLSession.shared.data(for: req)
+        isUploading = false
+        uploadDone = true
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        uploadDone = false
     }
 }
 

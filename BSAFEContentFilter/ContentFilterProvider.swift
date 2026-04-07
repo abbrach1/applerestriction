@@ -55,20 +55,43 @@ class ContentFilterProvider: NEFilterDataProvider {
         guard !host.isEmpty else { return .allow() }
 
         // Never block essential system / app services
-        if isEssential(host) { return .allow() }
+        if isEssential(host) {
+            logDecision(host: host, allowed: true, reason: "essential")
+            return .allow()
+        }
 
         // Full lock — block everything else
-        if isLocked { return .drop() }
+        if isLocked {
+            logDecision(host: host, allowed: false, reason: "locked")
+            return .drop()
+        }
 
         if isWhitelistMode {
             // Allow only explicitly permitted domains
             let allowed = allowedDomains.contains { matches(host: host, rule: $0) }
+            logDecision(host: host, allowed: allowed, reason: "whitelist")
             return allowed ? .allow() : .drop()
         } else {
             // Block explicitly listed domains
             let blocked = blockedDomains.contains { matches(host: host, rule: $0) }
+            logDecision(host: host, allowed: !blocked, reason: "blacklist")
             return blocked ? .drop() : .allow()
         }
+    }
+
+    private func logDecision(host: String, allowed: Bool, reason: String) {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+        var logs = defaults.array(forKey: "bsafe.filter.logs") as? [[String: Any]] ?? []
+        let entry: [String: Any] = [
+            "host": host,
+            "allowed": allowed,
+            "reason": reason,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        logs.append(entry)
+        // Keep last 200 entries
+        if logs.count > 200 { logs = Array(logs.suffix(200)) }
+        defaults.set(logs, forKey: "bsafe.filter.logs")
     }
 
     // MARK: - Helpers
