@@ -162,14 +162,12 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     func applyWebsiteRestrictions() {
         if configuration.websiteFilterMode == .blacklist {
-            // Block all web categories if any domains are in the list;
-            // clear if the list is empty (admin explicitly removed all blocks).
-            if configuration.blockedWebsites.isEmpty {
-                if !isDowntimeActive {
-                    store.shield.webDomainCategories = nil
-                }
-            } else {
-                store.shield.webDomainCategories = WebPolicy.all()
+            // Blacklist mode: per-domain blocking is handled entirely by the
+            // BSAFEContentFilter NEFilterDataProvider extension.
+            // Do NOT use WebPolicy.all() here — that blocks every website via
+            // Screen Time API and is not domain-specific.
+            if !isDowntimeActive {
+                store.shield.webDomainCategories = nil
             }
         } else {
             // Whitelist mode

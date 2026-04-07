@@ -1109,7 +1109,6 @@ struct WebsiteTab: View {
     @State private var newDomain = ""
     @State private var newPendingDomain = ""
     @State private var isSendingDomain = false
-    @State private var pendingWebsites: [String: String] = [:]  // [pushKey: domain]
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -1282,10 +1281,10 @@ struct WebsiteTab: View {
                 }
             }
 
-            // Send a specific website to the child's device
+            // Block a specific website immediately
             Section {
                 HStack {
-                    TextField("domain (e.g. amazon.com)", text: $newPendingDomain)
+                    TextField("domain (e.g. tiktok.com)", text: $newPendingDomain)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
@@ -1293,28 +1292,14 @@ struct WebsiteTab: View {
                         Task { await sendWebsiteToDevice() }
                     } label: {
                         if isSendingDomain { ProgressView() }
-                        else { Text("Send") }
+                        else { Text("Block") }
                     }
                     .disabled(newPendingDomain.trimmingCharacters(in: .whitespaces).isEmpty || isSendingDomain)
                 }
-
-                if !pendingWebsites.isEmpty {
-                    ForEach(Array(pendingWebsites), id: \.key) { pushKey, domain in
-                        HStack {
-                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.orange)
-                            Text(domain).font(.subheadline)
-                            Spacer()
-                            Button("Remove", role: .destructive) {
-                                Task { await removePendingWebsite(pushKey: pushKey) }
-                            }
-                            .font(.caption)
-                        }
-                    }
-                }
             } header: {
-                Text("Send Website to Device")
+                Text("Quick Block")
             } footer: {
-                Text("Type a domain and tap Send. The child will see it in B-SAFE and can add it to their whitelist with one tap.")
+                Text("Adds the domain to the blocked list and applies it immediately — no action needed from the child.")
             }
 
             Section {
@@ -1382,7 +1367,6 @@ struct WebsiteTab: View {
                 }
             }
         }
-        .task { await loadPendingWebsites() }
     }
 
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
@@ -1396,41 +1380,23 @@ struct WebsiteTab: View {
             .components(separatedBy: "/").first ?? raw
     }
 
-    private func loadPendingWebsites() async {
-        let token = await auth.freshToken() ?? ""
-        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)") else { return }
-        if let (data, _) = try? await URLSession.shared.data(from: url),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
-            pendingWebsites = dict
-        }
-    }
-
     private func sendWebsiteToDevice() async {
         let domain = cleanDomain(newPendingDomain)
         guard !domain.isEmpty else { return }
-        isSendingDomain = true
-        let token = await auth.freshToken() ?? ""
-        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites.json?auth=\(token)"),
-              let body = try? JSONEncoder().encode(domain) else {
-            isSendingDomain = false; return
+        guard !vm.config.blockedWebsites.contains(domain) else {
+            newPendingDomain = ""
+            return
         }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = body
-        _ = try? await URLSession.shared.data(for: req)
+        isSendingDomain = true
+        vm.config.blockedWebsites.append(domain)
+        // Switch to blacklist mode if currently in whitelist mode
+        if vm.config.websiteFilterMode == .whitelist {
+            vm.config.websiteFilterMode = .blacklist
+        }
+        let token = await auth.freshToken() ?? ""
+        await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
         newPendingDomain = ""
         isSendingDomain = false
-        await loadPendingWebsites()
-    }
-
-    private func removePendingWebsite(pushKey: String) async {
-        let token = await auth.freshToken() ?? ""
-        guard let url = URL(string: "\(dbURL)/users/\(user.uid)/pendingWebsites/\(pushKey).json?auth=\(token)") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "DELETE"
-        _ = try? await URLSession.shared.data(for: req)
-        pendingWebsites.removeValue(forKey: pushKey)
     }
 }
 
