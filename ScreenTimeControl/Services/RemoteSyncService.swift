@@ -139,6 +139,21 @@ class RemoteSyncService: ObservableObject {
             }
         }
 
+        // Fetch admin alert config once so child device can send emails
+        // independently of the admin app being open.
+        Task {
+            let adminRef = Database.database().reference(withPath: "adminConfig")
+            if let snap = try? await adminRef.getData(),
+               let dict = snap.value as? [String: Any] {
+                if let email = dict["alertEmail"] as? String, !email.isEmpty {
+                    UserDefaults.standard.set(email, forKey: "bsafe.alertEmail")
+                }
+                if let key = dict["sendGridApiKey"] as? String, !key.isEmpty {
+                    UserDefaults.standard.set(key, forKey: "bsafe.sendGridApiKey")
+                }
+            }
+        }
+
         let userRef = dbRef.child("users/\(uid)")
 
         // Settings — fires immediately with current value, then on every change
