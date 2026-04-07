@@ -85,10 +85,8 @@ class RemoteSyncService: ObservableObject {
                let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
                 _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
-            await sendEmailAlert(
-                subject: "B-SAFE: DNS Protection Alert",
-                body: "Device: \(UIDevice.current.name)\n\(message)"
-            )
+            let subject = nowEnabled ? "B-SAFE: DNS Protection Restored" : "B-SAFE: DNS Protection Removed"
+            await sendEmailAlert(subject: subject, body: "Device: \(UIDevice.current.name)\n\(message)")
         }
 
         // If still not enabled, show a local notification so the child is prompted
@@ -610,10 +608,8 @@ class RemoteSyncService: ObservableObject {
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
             }
-            await sendEmailAlert(
-                subject: "B-SAFE: DNS Protection Alert",
-                body: "Device: \(UIDevice.current.name)\n\(message)"
-            )
+            let subject = nowEnabled ? "B-SAFE: DNS Protection Restored" : "B-SAFE: DNS Protection Removed"
+            await sendEmailAlert(subject: subject, body: "Device: \(UIDevice.current.name)\n\(message)")
         }
 
         if !nowEnabled {
@@ -627,17 +623,17 @@ class RemoteSyncService: ObservableObject {
         #endif
     }
 
-    // MARK: - Email Alert
+    // MARK: - Email Alerts (SendGrid)
 
+    /// Sends an email alert via SendGrid REST API.
+    /// Admin enters their email + SendGrid API key in Notification Settings.
     private func sendEmailAlert(subject: String, body: String) async {
         let email = UserDefaults.standard.string(forKey: "bsafe.alertEmail") ?? ""
         let apiKey = UserDefaults.standard.string(forKey: "bsafe.sendGridApiKey") ?? ""
-        guard !email.isEmpty else { return }
-        guard !apiKey.isEmpty else { return }
-
+        guard !email.isEmpty, !apiKey.isEmpty else { return }
         let payload: [String: Any] = [
             "personalizations": [["to": [["email": email]]]],
-            "from": ["email": "noreply@bsafe-app.com", "name": "B-SAFE"],
+            "from": ["email": "noreply@bsafe-alerts.com", "name": "B-SAFE"],
             "subject": subject,
             "content": [["type": "text/plain", "value": body]]
         ]

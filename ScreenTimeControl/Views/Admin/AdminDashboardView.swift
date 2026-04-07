@@ -426,6 +426,7 @@ struct AdminDashboardView: View {
     @State private var nextDNSApiKey = ""
     @State private var nextDNSSaved = false
     @State private var alertEmail = ""
+    @State private var sendGridApiKey = ""
     @State private var alertEmailSaved = false
     @State private var mainTab = 0
     @State private var allRequests: [(uid: String, userName: String, type: String, detail: String, pushKey: String, timestamp: Date)] = []
@@ -581,14 +582,17 @@ struct AdminDashboardView: View {
                         }
 
                         Section {
-                            TextField("Alert Email", text: $alertEmail)
+                            TextField("your@email.com", text: $alertEmail)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
+                            SecureField("SendGrid API Key", text: $sendGridApiKey)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
                         } header: {
                             Text("Email Alerts")
                         } footer: {
-                            Text("Receive email alerts when DNS protection is removed or restored. Requires a SendGrid API key set in Firebase under adminConfig/sendGridApiKey.")
+                            Text("Receive an email when a child's DNS protection is removed or fails to restore. Uses SendGrid (sendgrid.com) — enter your API key above.")
                                 .font(.caption)
                         }
 
@@ -596,14 +600,25 @@ struct AdminDashboardView: View {
                             Button {
                                 Task {
                                     let token = await auth.freshToken() ?? ""
-                                    let trimmed = alertEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    if !trimmed.isEmpty {
-                                        UserDefaults.standard.set(trimmed, forKey: "bsafe.alertEmail")
+                                    let trimmedEmail = alertEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let trimmedKey = sendGridApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !trimmedEmail.isEmpty {
+                                        UserDefaults.standard.set(trimmedEmail, forKey: "bsafe.alertEmail")
                                         if let url = URL(string: "\(dbURL)/adminConfig/alertEmail.json?auth=\(token)") {
                                             var req = URLRequest(url: url)
                                             req.httpMethod = "PUT"
                                             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                                            req.httpBody = "\"\(trimmed)\"".data(using: .utf8)
+                                            req.httpBody = "\"\(trimmedEmail)\"".data(using: .utf8)
+                                            _ = try? await URLSession.shared.data(for: req)
+                                        }
+                                    }
+                                    if !trimmedKey.isEmpty {
+                                        UserDefaults.standard.set(trimmedKey, forKey: "bsafe.sendGridApiKey")
+                                        if let url = URL(string: "\(dbURL)/adminConfig/sendGridApiKey.json?auth=\(token)") {
+                                            var req = URLRequest(url: url)
+                                            req.httpMethod = "PUT"
+                                            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                                            req.httpBody = "\"\(trimmedKey)\"".data(using: .utf8)
                                             _ = try? await URLSession.shared.data(for: req)
                                         }
                                     }
@@ -614,7 +629,7 @@ struct AdminDashboardView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: alertEmailSaved ? "checkmark.circle.fill" : "envelope.fill")
-                                    Text(alertEmailSaved ? "Saved!" : "Save Alert Email")
+                                    Text(alertEmailSaved ? "Saved!" : "Save Email Settings")
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
@@ -624,7 +639,7 @@ struct AdminDashboardView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .listRowBackground(Color.clear)
-                            .disabled(alertEmail.isEmpty)
+                            .disabled(alertEmail.isEmpty || sendGridApiKey.isEmpty)
                         }
 
                         Section("About FCM Token") {
@@ -653,6 +668,9 @@ struct AdminDashboardView: View {
                 if let local = UserDefaults.standard.string(forKey: "bsafe.alertEmail"), !local.isEmpty {
                     alertEmail = local
                 }
+                if let local = UserDefaults.standard.string(forKey: "bsafe.sendGridApiKey"), !local.isEmpty {
+                    sendGridApiKey = local
+                }
                 let token = await auth.freshToken() ?? ""
                 await vm.loadUsers(idToken: token)
                 // Then refresh from Firebase (may be newer)
@@ -672,10 +690,17 @@ struct AdminDashboardView: View {
                 }
                 if let url = URL(string: "\(dbURL)/adminConfig/alertEmail.json?auth=\(token)"),
                    let (data, _) = try? await URLSession.shared.data(from: url),
+                   let val = try? JSONDecoder().decode(String.self, from: data),
+                   !val.isEmpty {
+                    alertEmail = val
+                    UserDefaults.standard.set(val, forKey: "bsafe.alertEmail")
+                }
+                if let url = URL(string: "\(dbURL)/adminConfig/sendGridApiKey.json?auth=\(token)"),
+                   let (data, _) = try? await URLSession.shared.data(from: url),
                    let key = try? JSONDecoder().decode(String.self, from: data),
                    !key.isEmpty {
-                    alertEmail = key
-                    UserDefaults.standard.set(key, forKey: "bsafe.alertEmail")
+                    sendGridApiKey = key
+                    UserDefaults.standard.set(key, forKey: "bsafe.sendGridApiKey")
                 }
                 await loadAllRequestsAndAlerts()
             }
