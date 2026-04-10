@@ -72,7 +72,7 @@ class RemoteSyncService: ObservableObject {
         // Attempt reapply — iOS may require user consent via a system dialog,
         // so we verify afterwards whether it actually took effect.
         if settings.dnsAutoReapply {
-            await ContentBlockerService.shared.enableForcedDNS(profileID: settings.nextDNSProfileID)
+            await ContentBlockerService.shared.enableForcedDNS(profileID: settings.nextDNSProfileID, removalPassword: settings.dnsRemovalPassword)
         }
 
         // Check whether reapply actually succeeded
@@ -590,7 +590,7 @@ class RemoteSyncService: ObservableObject {
         }
 
         if config.dnsAutoReapply {
-            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID, removalPassword: config.dnsRemovalPassword)
         }
 
         let nowEnabled = await ContentBlockerService.shared.isDNSEnabled()

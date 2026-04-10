@@ -257,7 +257,7 @@ struct ChildDeviceView: View {
                 Button("Restore") {
                     Task {
                         #if !targetEnvironment(simulator)
-                        await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
+                        await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID, removalPassword: config.dnsRemovalPassword)
                         let ok = await ContentBlockerService.shared.isDNSEnabled()
                         await MainActor.run { syncService.dnsProtectionMissing = !ok }
                         if ok { syncService.cancelDNSTamperAlerts() }

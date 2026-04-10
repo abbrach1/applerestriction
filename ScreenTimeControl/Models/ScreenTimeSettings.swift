@@ -30,6 +30,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var nextDNSApiKey: String = ""          // NextDNS API key (admin only)
     var dnsAlertOnRemoval: Bool = true      // notify admin if child removes DNS profile
     var dnsAutoReapply: Bool = true         // automatically re-install DNS profile if removed
+    var dnsRemovalPassword: String = ""     // password required to remove DNS profile (empty = no password)
     var safeSearchEnabled: Bool = false     // force SafeSearch on Google + Bing via NextDNS
     var youtubeRestrictedEnabled: Bool = false  // YouTube Restricted Mode via NextDNS
     var blockedDNSServices: [String] = []   // NextDNS service IDs to block, e.g. ["tiktok"]
@@ -62,6 +63,7 @@ extension ScreenTimeConfiguration {
         nextDNSApiKey          = try c.decodeIfPresent(String.self, forKey: .nextDNSApiKey)          ?? ""
         dnsAlertOnRemoval      = try c.decodeIfPresent(Bool.self,     forKey: .dnsAlertOnRemoval)      ?? true
         dnsAutoReapply         = try c.decodeIfPresent(Bool.self,     forKey: .dnsAutoReapply)         ?? true
+        dnsRemovalPassword     = try c.decodeIfPresent(String.self,   forKey: .dnsRemovalPassword)     ?? ""
         safeSearchEnabled      = try c.decodeIfPresent(Bool.self,     forKey: .safeSearchEnabled)      ?? false
         youtubeRestrictedEnabled = try c.decodeIfPresent(Bool.self,   forKey: .youtubeRestrictedEnabled) ?? false
         blockedDNSServices     = try c.decodeIfPresent([String].self, forKey: .blockedDNSServices)     ?? []

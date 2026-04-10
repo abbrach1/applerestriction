@@ -2502,12 +2502,26 @@ struct DNSTab: View {
                                 }
                             } icon: { Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green) }
                         }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Removal Password").font(.subheadline).fontWeight(.medium)
+                                    Text("Child must enter this password to remove the DNS profile from Settings. Leave blank for no password.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "lock.fill").foregroundStyle(.red) }
+                            SecureField("Set removal password…", text: $vm.config.dnsRemovalPassword)
+                                .textFieldStyle(.roundedBorder)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .padding(.leading, 32)
+                        }
                     }
                 } header: {
                     Text("Configuration")
                 } footer: {
                     if vm.config.forceDNS {
-                        Text("Find your Profile ID at nextdns.io → your profile → Setup.")
+                        Text("Find your Profile ID at nextdns.io → your profile → Setup. With a removal password set, the profile installs via Safari and requires the password to uninstall.")
                             .font(.caption)
                     } else {
                         Text("NextDNS blocks domains system-wide across all apps. Toggle on to configure.")

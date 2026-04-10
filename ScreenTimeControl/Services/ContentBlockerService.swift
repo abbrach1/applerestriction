@@ -46,30 +46,44 @@ class ContentBlockerService {
     // MARK: - DNS
 
     /// Returns whether the DNS profile is currently installed and enabled.
+    /// Uses NextDNS test API if the profile was installed as a .mobileconfig,
+    /// otherwise checks NEDNSSettingsManager directly.
     func isDNSEnabled() async -> Bool {
-        await withCheckedContinuation { continuation in
+        if UserDefaults.standard.bool(forKey: "bsafe.dns.usingMobileConfig") {
+            let profileID = UserDefaults.standard.string(forKey: "bsafe.dns.profileID") ?? ""
+            return await MobileConfigService.shared.isDNSActive(profileID: profileID)
+        }
+        return await withCheckedContinuation { continuation in
             NEDNSSettingsManager.shared().loadFromPreferences { _ in
                 continuation.resume(returning: NEDNSSettingsManager.shared().isEnabled)
             }
         }
     }
 
-    /// Install a NextDNS DoH profile for the given profile ID.
-    /// Falls back to NextDNS default (no filtering) if profileID is empty.
-    /// Calling multiple times is safe — NEDNSSettingsManager replaces existing profile.
-    func enableForcedDNS(profileID: String) async {
-        let urlString = profileID.isEmpty
-            ? "https://dns.nextdns.io"
-            : "https://dns.nextdns.io/\(profileID)"
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            NEDNSSettingsManager.shared().loadFromPreferences { _ in
-                let doh = NEDNSOverHTTPSSettings(servers: ["45.90.28.0", "45.90.30.0"])
-                doh.serverURL = URL(string: urlString)
-                NEDNSSettingsManager.shared().dnsSettings = doh
-                NEDNSSettingsManager.shared().localizedDescription = "B-SAFE DNS Filter"
-                NEDNSSettingsManager.shared().saveToPreferences { error in
-                    if let error { print("[B-SAFE] DNS save error: \(error)") }
-                    continuation.resume()
+    /// Install a NextDNS DoH profile.
+    /// If a removal password is set, installs as a .mobileconfig via Safari so
+    /// the child must enter the password to remove it.
+    /// Otherwise uses NEDNSSettingsManager (silent, no removal password).
+    func enableForcedDNS(profileID: String, removalPassword: String = "") async {
+        UserDefaults.standard.set(profileID, forKey: "bsafe.dns.profileID")
+        if !removalPassword.isEmpty {
+            await MobileConfigService.shared.install(
+                profileID: profileID,
+                removalPassword: removalPassword)
+        } else {
+            let urlString = profileID.isEmpty
+                ? "https://dns.nextdns.io"
+                : "https://dns.nextdns.io/\(profileID)"
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                NEDNSSettingsManager.shared().loadFromPreferences { _ in
+                    let doh = NEDNSOverHTTPSSettings(servers: ["45.90.28.0", "45.90.30.0"])
+                    doh.serverURL = URL(string: urlString)
+                    NEDNSSettingsManager.shared().dnsSettings = doh
+                    NEDNSSettingsManager.shared().localizedDescription = "B-SAFE DNS Filter"
+                    NEDNSSettingsManager.shared().saveToPreferences { error in
+                        if let error { print("[B-SAFE] DNS save error: \(error)") }
+                        continuation.resume()
+                    }
                 }
             }
         }
