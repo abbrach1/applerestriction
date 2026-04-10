@@ -251,7 +251,7 @@ struct ChildDeviceView: View {
                 Image(systemName: "network.slash").font(.title3).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("DNS Protection Disabled").font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
-                    Text("Your internet filter has been turned off.").font(.caption).foregroundStyle(.white.opacity(0.85))
+                    Text("Go to Settings → General → VPN & Device Management → B-SAFE DNS → Install").font(.caption).foregroundStyle(.white.opacity(0.85))
                 }
                 Spacer()
                 Button("Restore") {

@@ -650,8 +650,8 @@ class RemoteSyncService: ObservableObject {
             let content = UNMutableNotificationContent()
             content.title = "⚠️ Internet Protection Disabled"
             content.body = i == 0
-                ? "DNS protection was removed. Open B-SAFE now to restore it."
-                : "DNS protection is still disabled. Open B-SAFE to restore protection."
+                ? "DNS protection was removed. To restore: Settings → General → VPN & Device Management → B-SAFE DNS → Install."
+                : "DNS protection is still off. Go to Settings → General → VPN & Device Management → B-SAFE DNS → Install."
             content.sound = .defaultCritical
             content.interruptionLevel = .critical
             content.badge = NSNumber(value: 1)
