@@ -411,29 +411,14 @@ class RemoteSyncService: ObservableObject {
         pendingWebsiteRequests.removeAll { $0.key == key }
     }
 
-    // MARK: - FCM Push to Admin
+    // MARK: - FCM Push to Admin (v1 API)
 
-    /// Sends a push notification to the admin device via FCM Legacy HTTP API.
-    /// Admin must configure their FCM server key in the admin dashboard settings.
-    /// Requires the admin device to have B-SAFE installed with notifications enabled.
+    /// Sends a push notification to the admin device via FCM HTTP v1 API.
+    /// Credentials come from FCMServiceAccount.plist bundled in the app target.
     private func sendFCMToAdmin(title: String, body: String) async {
-        let tokenSnap = try? await dbRef.child("adminConfig/fcmToken").getData()
-        let keySnap   = try? await dbRef.child("adminConfig/fcmServerKey").getData()
-        guard let token = tokenSnap?.value as? String, !token.isEmpty,
-              let serverKey = keySnap?.value as? String, !serverKey.isEmpty else { return }
-        guard let url = URL(string: "https://fcm.googleapis.com/fcm/send") else { return }
-        let payload: [String: Any] = [
-            "to": token,
-            "notification": ["title": title, "body": body, "sound": "default"],
-            "priority": "high"
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("key=\(serverKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = data
-        _ = try? await URLSession.shared.data(for: req)
+        guard let snap = try? await dbRef.child("adminConfig/fcmToken").getData(),
+              let token = snap.value as? String, !token.isEmpty else { return }
+        await FCMv1Service.shared.send(to: token, title: title, body: body)
     }
 
     // MARK: - Manual Sync (refresh button)

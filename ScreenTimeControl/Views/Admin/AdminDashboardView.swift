@@ -510,39 +510,11 @@ struct AdminDashboardView: View {
                 NavigationStack {
                     Form {
                         Section {
-                            SecureField("FCM Server Key", text: $fcmServerKey)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
+                            Text("Push notifications use the FCM v1 API via a service account. Add FCMServiceAccount.plist to your Xcode project with your client_email and private_key from Firebase Console → Project Settings → Service Accounts → Generate new private key.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         } header: {
                             Text("Push Notifications to Admin")
-                        } footer: {
-                            Text("Get this from Firebase Console → Project Settings → Cloud Messaging → Server Key. Enables push notifications to your phone when a child sends an unlock or website request.")
-                                .font(.caption)
-                        }
-
-                        Section {
-                            Button {
-                                Task {
-                                    let token = await auth.freshToken() ?? ""
-                                    await saveFCMServerKey(token: token)
-                                    fcmSaved = true
-                                    _ = try? await Task.sleep(nanoseconds: 2_000_000_000)
-                                    fcmSaved = false
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: fcmSaved ? "checkmark.circle.fill" : "icloud.and.arrow.up")
-                                    Text(fcmSaved ? "Saved!" : "Save Server Key")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(fcmSaved ? Color.green : Color(red: 0, green: 0.4, blue: 0.15))
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                            .listRowBackground(Color.clear)
-                            .disabled(fcmServerKey.isEmpty)
                         }
 
                         Section {
@@ -578,7 +550,7 @@ struct AdminDashboardView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .listRowBackground(Color.clear)
-                            .disabled(fcmServerKey.isEmpty && nextDNSApiKey.isEmpty)
+                            .disabled(nextDNSApiKey.isEmpty)
                         }
 
                         Section {
@@ -643,7 +615,7 @@ struct AdminDashboardView: View {
                         }
 
                         Section("About FCM Token") {
-                            Text("Your device's FCM token is automatically registered when you open the admin dashboard. No extra steps needed — just enter the server key above.")
+                            Text("Your device's FCM token is automatically registered when you open the admin dashboard. No extra steps needed — just add FCMServiceAccount.plist to the project.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
