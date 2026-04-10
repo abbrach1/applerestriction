@@ -169,20 +169,9 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     func applyWebsiteRestrictions() {
         guard !isDowntimeActive else { return }
-
-        let hasRestrictions = configuration.websiteFilterMode == .whitelist
-                           || !configuration.blockedWebsites.isEmpty
-
-        if hasRestrictions {
-            // Route all web traffic through NEFilterDataProvider.
-            // The extension applies whitelist or blacklist logic using domain strings.
-            store.webContent.blockedByFilter = .blocked
-        } else {
-            // No website restrictions — let traffic flow freely.
-            store.webContent.blockedByFilter = .auto
-        }
-
-        // Clear any legacy shield-level web blocks; NEFilter owns per-domain decisions.
+        // NEFilter (BSAFEContentFilter extension) handles per-domain allow/block.
+        // It is enabled/disabled via ContentFilterService.enable()/disable() separately.
+        // Clear any shield-level web blocks so they don't conflict.
         store.shield.webDomainCategories = nil
         store.shield.webDomains = nil
         saveConfiguration()
