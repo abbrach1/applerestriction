@@ -121,6 +121,7 @@ class ScreenTimeSettingsManager: ObservableObject {
             store.shield.webDomainCategories = nil
             isDowntimeActive = false
             applyAppRestrictions()
+            applyWebsiteRestrictions() // restore webContent.blockedByFilter
         }
     }
 
@@ -154,30 +155,36 @@ class ScreenTimeSettingsManager: ObservableObject {
 
     // MARK: - Website Blocking
     //
-    // NOTE: store.shield.webDomains requires opaque WebDomainToken values
-    // obtained from FamilyActivitySelection (on-device picker only).
-    // Plain domain strings cannot be converted to tokens remotely.
-    // Instead we use category-level blocking: any blocked domains → block all web,
-    // whitelist mode → block all web. Domain strings are stored for reference.
+    // Strategy: store.webContent.blockedByFilter = .blocked routes ALL web traffic
+    // (Safari, WKWebView, etc.) through the BSAFEContentFilter NEFilterDataProvider
+    // extension. The extension reads the domain lists from the shared App Group and
+    // makes per-domain allow/block decisions using plain strings from Firebase.
+    //
+    // We cannot use .onlyAllow(webDomainTokens:) because that API requires opaque
+    // WebDomainToken values from a FamilyActivityPicker — plain domain strings
+    // received from the admin over Firebase cannot be converted to tokens.
+    //
+    // .blocked also acts as a safety net: if NEFilter is not running, all web is
+    // blocked rather than leaking through unfiltered.
 
     func applyWebsiteRestrictions() {
-        if configuration.websiteFilterMode == .blacklist {
-            // Blacklist mode: per-domain blocking is handled entirely by the
-            // BSAFEContentFilter NEFilterDataProvider extension.
-            // Do NOT use WebPolicy.all() here — that blocks every website via
-            // Screen Time API and is not domain-specific.
-            if !isDowntimeActive {
-                store.shield.webDomainCategories = nil
-            }
+        guard !isDowntimeActive else { return }
+
+        let hasRestrictions = configuration.websiteFilterMode == .whitelist
+                           || !configuration.blockedWebsites.isEmpty
+
+        if hasRestrictions {
+            // Route all web traffic through NEFilterDataProvider.
+            // The extension applies whitelist or blacklist logic using domain strings.
+            store.webContent.blockedByFilter = .blocked
         } else {
-            // Whitelist mode
-            // DO NOT use store.shield.webDomainCategories here — that blocks WKWebView too,
-            // making B-SAFE Browser show "Restricted" even for allowed sites.
-            // Safari is handled by the BSAFEContentBlocker extension (whitelist rules).
-            // B-SAFE Browser is handled by the WKWebView navigation delegate.
-            store.shield.webDomainCategories = nil
-            store.shield.webDomains = nil
+            // No website restrictions — let traffic flow freely.
+            store.webContent.blockedByFilter = .auto
         }
+
+        // Clear any legacy shield-level web blocks; NEFilter owns per-domain decisions.
+        store.shield.webDomainCategories = nil
+        store.shield.webDomains = nil
         saveConfiguration()
     }
 
