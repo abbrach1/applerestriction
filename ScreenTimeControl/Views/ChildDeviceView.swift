@@ -260,6 +260,7 @@ struct ChildDeviceView: View {
                         await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID)
                         let ok = await ContentBlockerService.shared.isDNSEnabled()
                         await MainActor.run { syncService.dnsProtectionMissing = !ok }
+                        if ok { syncService.cancelDNSTamperAlerts() }
                         #endif
                     }
                 }

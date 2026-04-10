@@ -62,7 +62,12 @@ class RemoteSyncService: ObservableObject {
               let settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data),
               settings.forceDNS else { return }
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        guard !isEnabled else { return }
+        guard !isEnabled else {
+            // DNS is healthy — clear any stale tamper alerts
+            cancelDNSTamperAlerts()
+            await MainActor.run { self.dnsProtectionMissing = false }
+            return
+        }
 
         // Attempt reapply — iOS may require user consent via a system dialog,
         // so we verify afterwards whether it actually took effect.
@@ -89,17 +94,11 @@ class RemoteSyncService: ObservableObject {
             await sendEmailAlert(subject: subject, body: "Device: \(UIDevice.current.name)\n\(message)")
         }
 
-        // If still not enabled, show a local notification so the child is prompted
         if !nowEnabled {
-            let content = UNMutableNotificationContent()
-            content.title = "DNS Protection Disabled"
-            content.body = "Your internet protection has been turned off. Please open B-SAFE to restore it."
-            content.sound = .default
-            let req = UNNotificationRequest(identifier: "bsafe.dns.removed", content: content, trigger: nil)
-            _ = try? await UNUserNotificationCenter.current().add(req)
-            // Publish so ChildDeviceView can show an in-app banner
+            scheduleDNSTamperAlerts()
             await MainActor.run { self.dnsProtectionMissing = true }
         } else {
+            cancelDNSTamperAlerts()
             await MainActor.run { self.dnsProtectionMissing = false }
         }
     }
@@ -498,7 +497,7 @@ class RemoteSyncService: ObservableObject {
 
     func requestNotificationPermission() {
         UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            .requestAuthorization(options: [.alert, .sound, .badge, .criticalAlert]) { _, _ in }
     }
 
     // MARK: - Private: Command Execution
@@ -628,14 +627,51 @@ class RemoteSyncService: ObservableObject {
         }
 
         if !nowEnabled {
-            let content = UNMutableNotificationContent()
-            content.title = "DNS Protection Disabled"
-            content.body = "Your internet protection has been turned off. Please open B-SAFE to restore it."
-            content.sound = .default
-            let req = UNNotificationRequest(identifier: "bsafe.dns.removed", content: content, trigger: nil)
-            _ = try? await UNUserNotificationCenter.current().add(req)
+            scheduleDNSTamperAlerts()
+        } else {
+            cancelDNSTamperAlerts()
         }
         #endif
+    }
+
+    // MARK: - DNS Tamper Notifications
+
+    /// Fire an immediate critical alert plus follow-ups every 60 s (up to 5 total)
+    /// so the child can't simply ignore the notification and walk away.
+    /// Uses the criticalAlert entitlement when approved by Apple; falls back to
+    /// timeSensitive (bypasses Focus modes) otherwise.
+    private func scheduleDNSTamperAlerts() {
+        let center = UNUserNotificationCenter.current()
+        // Cancel any stale series first
+        center.removePendingNotificationRequests(withIdentifiers:
+            (0..<5).map { "bsafe.dns.tamper.\($0)" })
+
+        for i in 0..<5 {
+            let content = UNMutableNotificationContent()
+            content.title = "⚠️ Internet Protection Disabled"
+            content.body = i == 0
+                ? "DNS protection was removed. Open B-SAFE now to restore it."
+                : "DNS protection is still disabled. Open B-SAFE to restore protection."
+            content.sound = .defaultCritical
+            content.interruptionLevel = .critical
+            content.badge = NSNumber(value: 1)
+
+            let trigger = i == 0 ? nil : UNTimeIntervalNotificationTrigger(
+                timeInterval: Double(i) * 60, repeats: false)
+            let req = UNNotificationRequest(
+                identifier: "bsafe.dns.tamper.\(i)",
+                content: content,
+                trigger: trigger)
+            UNUserNotificationCenter.current().add(req) { _ in }
+        }
+    }
+
+    /// Cancel all pending DNS tamper notifications (called when DNS is restored).
+    func cancelDNSTamperAlerts() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers:
+            (0..<5).map { "bsafe.dns.tamper.\($0)" })
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:
+            (0..<5).map { "bsafe.dns.tamper.\($0)" })
     }
 
     // MARK: - Email Alerts (SendGrid)
