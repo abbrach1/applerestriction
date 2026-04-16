@@ -1555,7 +1555,7 @@ struct WebsiteTab: View {
                     }
                 }
             } header: { Text("Browser & Protection") } footer: {
-                Text("Safari Content Blocker enforces the domain list in Safari. B-SAFE Browser restricts browsing to allowed sites only.")
+                Text("Safari Content Blocker enforces the domain list in Safari. B-SAFE Browser restricts browsing to allowed sites only. Both work without DNS — NextDNS is optional.")
                     .font(.caption)
             }
 
@@ -2524,7 +2524,7 @@ struct DNSTab: View {
                         Text("Find your Profile ID at nextdns.io → your profile → Setup. With a removal password set, the profile installs via Safari and requires the password to uninstall.")
                             .font(.caption)
                     } else {
-                        Text("NextDNS blocks domains system-wide across all apps. Toggle on to configure.")
+                        Text("NextDNS is optional — the Safari Content Blocker and Network Filter enforce the website list without DNS. Enable NextDNS for extra system-wide blocking, safe search, and category filtering.")
                             .font(.caption)
                     }
                 }

@@ -24,7 +24,7 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var downtimeSchedule: DowntimeSchedule = DowntimeSchedule()
     var isLocked: Bool = false
     var blockNewApps: Bool = false
-    var contentBlockerEnabled: Bool = false
+    var contentBlockerEnabled: Bool = true
     var forceDNS: Bool = false
     var nextDNSProfileID: String = ""       // NextDNS profile ID, e.g. "abc123"
     var nextDNSApiKey: String = ""          // NextDNS API key (admin only)
@@ -57,7 +57,7 @@ extension ScreenTimeConfiguration {
         downtimeSchedule  = try c.decodeIfPresent(DowntimeSchedule.self, forKey: .downtimeSchedule) ?? DowntimeSchedule()
         isLocked               = try c.decodeIfPresent(Bool.self,   forKey: .isLocked)               ?? false
         blockNewApps           = try c.decodeIfPresent(Bool.self,   forKey: .blockNewApps)           ?? false
-        contentBlockerEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .contentBlockerEnabled)  ?? false
+        contentBlockerEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .contentBlockerEnabled)  ?? true
         forceDNS               = try c.decodeIfPresent(Bool.self,   forKey: .forceDNS)               ?? false
         nextDNSProfileID       = try c.decodeIfPresent(String.self, forKey: .nextDNSProfileID)       ?? ""
         nextDNSApiKey          = try c.decodeIfPresent(String.self, forKey: .nextDNSApiKey)          ?? ""

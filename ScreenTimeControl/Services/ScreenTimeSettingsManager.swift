@@ -231,12 +231,13 @@ class ScreenTimeSettingsManager: ObservableObject {
         applyAppRestrictions()
         applyWebsiteRestrictions()
 
-        // Content blocker (Safari) + DNS
-        if config.contentBlockerEnabled {
-            ContentBlockerService.shared.applyRules(for: config)
-        } else {
-            ContentBlockerService.shared.clearRules()
-        }
+        // Safari Content Blocker — always apply rules based on config.
+        // This is the DNS-independent enforcement path for Safari. The
+        // `contentBlockerEnabled` flag is surfaced to the child as a
+        // Safari-settings requirement (they must turn the extension on in
+        // Safari → Extensions), but the rules JSON is always kept in sync
+        // so the filter is instantly live once enabled.
+        ContentBlockerService.shared.applyRules(for: config)
 
         Task {
             if config.forceDNS {
