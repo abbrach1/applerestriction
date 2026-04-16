@@ -1559,7 +1559,9 @@ struct WebsiteTab: View {
                     .font(.caption)
             }
 
-            // 5. Apply Website Settings
+            // 5. Apply Website Settings — pushes the list to Safari Content
+            //    Blocker + NEFilter on the child. DNS is managed separately in
+            //    the DNS tab and is never mixed in here.
             Section {
                 ApplyButton(label: "Apply Website Settings",
                             icon: "globe",
@@ -1569,27 +1571,11 @@ struct WebsiteTab: View {
                     Task {
                         let token = await auth.freshToken() ?? ""
                         await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
-                        // Sync to NextDNS if configured
-                        let effectiveKey = globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
-                        if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !effectiveKey.isEmpty {
-                            let result = await NextDNSService.shared.sync(
-                                profileID: vm.config.nextDNSProfileID,
-                                apiKey: effectiveKey,
-                                allowedDomains: vm.config.allowedWebsites,
-                                blockedDomains: vm.config.blockedWebsites,
-                                whitelistMode: vm.config.websiteFilterMode == .whitelist
-                            )
-                            if !result.success, let err = result.error {
-                                vm.lastError = "NextDNS sync failed: \(err)"
-                            }
-                        }
                     }
                 }
-
-                let effectiveKey = globalApiKey.isEmpty ? vm.config.nextDNSApiKey : globalApiKey
-                if vm.config.forceDNS && !vm.config.nextDNSProfileID.isEmpty && !effectiveKey.isEmpty {
-                    NextDNSSyncStatusRow(vm: vm, globalApiKey: effectiveKey)
-                }
+            } footer: {
+                Text("Applies the list via Safari Content Blocker and the Network Filter on the child's device. NextDNS is managed separately in the DNS tab.")
+                    .font(.caption)
             }
 
             // 6. Child Device Setup Status (bottom, secondary)
@@ -2454,6 +2440,8 @@ struct DNSTab: View {
     @State private var logFilter = ""
     @State private var isSavingSafety = false
     @State private var safetySaved = false
+    @State private var isSyncingWebsites = false
+    @State private var websitesSyncResult: String? = nil
     @State private var autoRefreshTimer: Timer? = nil
 
     private var profileID: String { vm.config.nextDNSProfileID }
@@ -2843,6 +2831,55 @@ struct DNSTab: View {
                 .listRowBackground(Color.clear)
             } footer: {
                 Text("Updates your NextDNS profile immediately. All devices using this profile are affected.")
+            }
+
+            // Push the Websites-tab list into NextDNS as a separate, explicit action.
+            Section {
+                Button {
+                    Task {
+                        isSyncingWebsites = true
+                        websitesSyncResult = nil
+                        let result = await NextDNSService.shared.sync(
+                            profileID: profileID,
+                            apiKey: effectiveApiKey,
+                            allowedDomains: vm.config.allowedWebsites,
+                            blockedDomains: vm.config.blockedWebsites,
+                            whitelistMode: vm.config.websiteFilterMode == .whitelist
+                        )
+                        isSyncingWebsites = false
+                        websitesSyncResult = result.success
+                            ? "Synced \(vm.config.blockedWebsites.count) blocked + \(vm.config.allowedWebsites.count) allowed."
+                            : "Sync failed: \(result.error ?? "unknown")"
+                        await reload()
+                    }
+                } label: {
+                    HStack {
+                        if isSyncingWebsites { ProgressView().tint(.white) }
+                        else { Image(systemName: "arrow.triangle.2.circlepath") }
+                        Text(isSyncingWebsites ? "Syncing…" : "Sync Website List → NextDNS")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.blue)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(isSyncingWebsites || !isConfigured)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+
+                if let result = websitesSyncResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundStyle(result.hasPrefix("Sync failed") ? .red : .secondary)
+                        .listRowBackground(Color.clear)
+                }
+            } header: {
+                Text("From Websites Tab")
+            } footer: {
+                Text("Pushes the blocked/allowed list from the Websites tab into this NextDNS profile's allow/deny lists. The Websites tab already enforces the list on-device via Safari Content Blocker + Network Filter; this makes DNS mirror it for extra coverage.")
+                    .font(.caption)
             }
         }
     }
