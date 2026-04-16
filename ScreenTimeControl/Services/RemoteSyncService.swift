@@ -5,6 +5,10 @@ import UserNotifications
 import FirebaseAuth
 import FirebaseDatabase
 
+#if !targetEnvironment(simulator)
+import SafariServices
+#endif
+
 /// Syncs Screen Time settings with Firebase Realtime Database.
 ///
 /// Uses the Firebase Database SDK's WebSocket listeners instead of REST polling:
@@ -20,6 +24,7 @@ class RemoteSyncService: ObservableObject {
     @Published var syncError: String?
     @Published var isOnline: Bool = true
     @Published var dnsProtectionMissing: Bool = false
+    @Published var webFilterProtectionMissing: Bool = false
     @Published var pendingWebsites: [String: String] = [:]
     @Published var pendingApps: [String: RecommendedApp] = [:]
     @Published var displayName: String = ""
@@ -46,6 +51,7 @@ class RemoteSyncService: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.recheckDNSOnForeground()
+                await self?.recheckWebFilterOnForeground()
                 self?.checkScheduledRelock()
             }
         }
@@ -169,6 +175,7 @@ class RemoteSyncService: ObservableObject {
                 self.syncError = nil
             }
             await self.checkDNSTamper(config: config, uid: uid)
+            await self.checkWebFilterTamper(config: config, uid: uid)
         }
 
         // Commands — childAdded fires once per new command, not for existing ones
@@ -657,6 +664,111 @@ class RemoteSyncService: ObservableObject {
             (0..<5).map { "bsafe.dns.tamper.\($0)" })
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:
             (0..<5).map { "bsafe.dns.tamper.\($0)" })
+    }
+
+    // MARK: - Web Filter Tamper Detection
+
+    /// Re-check whether the Safari Content Blocker + NEFilter are still enforcing
+    /// the website list. Called on foreground and after every settings update.
+    /// Sends a TamperAlert to the admin if either was turned off by the child
+    /// while web restrictions are active.
+    func recheckWebFilterOnForeground() async {
+        #if !targetEnvironment(simulator)
+        guard let uid = Auth.auth().currentUser?.uid,
+              let snapshot = try? await Database.database()
+                .reference(withPath: "users/\(uid)/settings")
+                .getData(),
+              let dict = snapshot.value as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              let settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data) else {
+            return
+        }
+        await checkWebFilterTamper(config: settings, uid: uid)
+        #endif
+    }
+
+    private func checkWebFilterTamper(config: ScreenTimeConfiguration, uid: String) async {
+        #if !targetEnvironment(simulator)
+        // Only care if there's an active website filter to enforce.
+        let hasRestrictions = config.websiteFilterMode == .whitelist || !config.blockedWebsites.isEmpty
+        guard hasRestrictions else {
+            webFilterProtectionMissing = false
+            cancelWebFilterTamperAlerts()
+            return
+        }
+
+        let blockerID = "com.abbrachfeld.screentimecontrolabbrach.BSAFEContentBlocker"
+        let blockerState = try? await SFContentBlockerManager.stateOfContentBlocker(withIdentifier: blockerID)
+        let safariOn = blockerState?.isEnabled ?? false
+        let filterOn = await ContentFilterService.shared.isEnabled()
+
+        // If NEFilter is active, domain enforcement is still system-wide even if the
+        // Safari extension is disabled. Still alert the admin, but don't fail-safe.
+        if safariOn && filterOn {
+            webFilterProtectionMissing = false
+            cancelWebFilterTamperAlerts()
+            return
+        }
+
+        webFilterProtectionMissing = true
+
+        let message: String
+        if !safariOn && !filterOn {
+            message = "Website filter completely disabled. Both the Safari Content Blocker and the Network Filter were turned off — the child can browse without restrictions. Manual action required."
+        } else if !filterOn {
+            message = "Network Filter was turned off. Safari is still filtered, but other apps and browsers can bypass the website list."
+        } else {
+            message = "Safari Content Blocker was turned off. The Network Filter is still enforcing the website list system-wide, but Safari-specific rules are not active."
+        }
+
+        let alert = TamperAlert(type: "web_filter_disabled", message: message, timestamp: Date())
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let d = try? encoder.encode(alert),
+           let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+        }
+        await sendEmailAlert(subject: "B-SAFE: Website Filter Disabled",
+                             body: "Device: \(UIDevice.current.name)\n\(message)")
+
+        scheduleWebFilterTamperAlerts(bothOff: !safariOn && !filterOn)
+        #endif
+    }
+
+    private func scheduleWebFilterTamperAlerts(bothOff: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers:
+            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
+
+        for i in 0..<5 {
+            let content = UNMutableNotificationContent()
+            content.title = "⚠️ Website Filter Disabled"
+            content.body = bothOff
+                ? (i == 0
+                    ? "Website filter is off. Re-enable B-SAFE Content Blocker (Settings → Safari → Extensions) and the Network Filter (Settings → General → VPN & Device Management → B-SAFE Content Filter)."
+                    : "Website filter is still off. Re-enable B-SAFE Content Blocker in Safari Extensions and the Network Filter.")
+                : (i == 0
+                    ? "A website filter component is off. Open the B-SAFE setup checklist to restore protection."
+                    : "Website filter is still partially disabled. Open the B-SAFE setup checklist to restore protection.")
+            content.sound = .defaultCritical
+            content.interruptionLevel = .timeSensitive
+            content.badge = NSNumber(value: 1)
+
+            let trigger = i == 0 ? nil : UNTimeIntervalNotificationTrigger(
+                timeInterval: Double(i) * 60, repeats: false)
+            let req = UNNotificationRequest(
+                identifier: "bsafe.webfilter.tamper.\(i)",
+                content: content,
+                trigger: trigger)
+            UNUserNotificationCenter.current().add(req) { _ in }
+        }
+    }
+
+    func cancelWebFilterTamperAlerts() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers:
+            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:
+            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
     }
 
     // MARK: - Email Alerts (SendGrid)
