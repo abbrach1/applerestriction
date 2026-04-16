@@ -1776,6 +1776,7 @@ struct AppsTab: View {
     let user: ManagedUser
     @EnvironmentObject var auth: FirebaseAuthService
     @State private var showingPicker = false
+    @State private var editingTimeLimit: AppTimeLimit? = nil
 
     // App search / push state
     @State private var appSearchQuery = ""
@@ -1970,6 +1971,54 @@ struct AppsTab: View {
                 Text("All apps are allowed by default. Selected apps will show a blocking screen on the device. Note: this picker shows your device's apps — use the child-side Admin Setup to pick from the child's installed apps.")
             }
 
+            // Per-app daily time limits. Each row is one limit; each limit can
+            // cover multiple apps / categories via its own FamilyActivitySelection.
+            // The child device's DeviceActivityMonitor extension tracks cumulative
+            // usage and shields the targeted apps once the minute budget is hit;
+            // the interval resets at midnight.
+            Section {
+                if vm.config.appTimeLimits.isEmpty {
+                    Text("No time limits yet. Add one to cap daily usage of an app.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(vm.config.appTimeLimits) { limit in
+                        Button {
+                            editingTimeLimit = limit
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: limit.enabled ? "timer" : "timer.square")
+                                    .foregroundStyle(limit.enabled ? .orange : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(limit.displayName.isEmpty ? "Untitled limit" : limit.displayName)
+                                        .font(.subheadline).fontWeight(.medium)
+                                        .foregroundStyle(.primary)
+                                    Text("\(limit.timeLimitMinutes) min/day\(limit.enabled ? "" : " · paused")")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { indices in
+                        vm.config.appTimeLimits.remove(atOffsets: indices)
+                    }
+                }
+
+                Button {
+                    editingTimeLimit = AppTimeLimit(displayName: "", timeLimitMinutes: 30)
+                } label: {
+                    Label("Add Time Limit", systemImage: "plus.circle.fill")
+                        .foregroundStyle(Color(red: 0, green: 0.4, blue: 0.15))
+                }
+            } header: {
+                Text("App Time Limits")
+            } footer: {
+                Text("Caps daily usage of the selected apps. Once the minute budget is hit, the apps are shielded for the rest of the day and reset at midnight.")
+                    .font(.caption)
+            }
+
             Section {
                 ApplyButton(label: "Apply App Settings",
                             icon: "checkmark.shield.fill",
@@ -2012,6 +2061,23 @@ struct AppsTab: View {
                     }
                 }
             }
+        }
+        .sheet(item: $editingTimeLimit) { limit in
+            TimeLimitEditorSheet(
+                initial: limit,
+                onSave: { updated in
+                    if let idx = vm.config.appTimeLimits.firstIndex(where: { $0.id == updated.id }) {
+                        vm.config.appTimeLimits[idx] = updated
+                    } else {
+                        vm.config.appTimeLimits.append(updated)
+                    }
+                    editingTimeLimit = nil
+                },
+                onDelete: {
+                    vm.config.appTimeLimits.removeAll { $0.id == limit.id }
+                    editingTimeLimit = nil
+                },
+                onCancel: { editingTimeLimit = nil })
         }
         #endif
         .task {
@@ -2898,6 +2964,154 @@ struct DNSTab: View {
 }
 
 // MARK: - Shared Components
+
+// MARK: - Time Limit Editor Sheet (used in AppsTab)
+
+/// Admin-side editor for a single AppTimeLimit. Handles create + edit + delete.
+/// Uses FamilyActivityPicker on the admin's phone to pick which apps/categories
+/// the limit covers, serializes the selection to base64, and passes the updated
+/// limit back up via onSave.
+struct TimeLimitEditorSheet: View {
+    let initial: AppTimeLimit
+    let onSave: (AppTimeLimit) -> Void
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    @State private var name: String
+    @State private var minutes: Int
+    @State private var enabled: Bool
+    #if !targetEnvironment(simulator)
+    @State private var selection: FamilyActivitySelection
+    #endif
+    @State private var showingPicker = false
+
+    init(initial: AppTimeLimit,
+         onSave: @escaping (AppTimeLimit) -> Void,
+         onDelete: @escaping () -> Void,
+         onCancel: @escaping () -> Void) {
+        self.initial = initial
+        self.onSave = onSave
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        _name = State(initialValue: initial.displayName)
+        _minutes = State(initialValue: max(1, initial.timeLimitMinutes))
+        _enabled = State(initialValue: initial.enabled)
+        #if !targetEnvironment(simulator)
+        if let b64 = initial.selectionData,
+           let data = Data(base64Encoded: b64),
+           let decoded = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) {
+            _selection = State(initialValue: decoded)
+        } else {
+            _selection = State(initialValue: FamilyActivitySelection())
+        }
+        #endif
+    }
+
+    private var isEditing: Bool { !initial.displayName.isEmpty || initial.selectionData != nil }
+
+    #if !targetEnvironment(simulator)
+    private var selectionSummary: String {
+        let apps = selection.applicationTokens.count
+        let cats = selection.categoryTokens.count
+        if apps == 0 && cats == 0 { return "Tap to pick apps or categories" }
+        var parts: [String] = []
+        if apps > 0 { parts.append("\(apps) app\(apps == 1 ? "" : "s")") }
+        if cats > 0 { parts.append("\(cats) categor\(cats == 1 ? "y" : "ies")") }
+        return parts.joined(separator: " · ")
+    }
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && minutes > 0
+            && (!selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty)
+    }
+    #else
+    private var selectionSummary: String { "Pick apps on device" }
+    private var canSave: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && minutes > 0 }
+    #endif
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Name") {
+                    TextField("e.g. YouTube", text: $name)
+                        .autocorrectionDisabled()
+                }
+
+                Section("Apps") {
+                    Button {
+                        showingPicker = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "app.badge.checkmark").foregroundStyle(.blue)
+                            Text(selectionSummary)
+                                .foregroundStyle(selectionSummary.hasPrefix("Tap") ? .secondary : .primary)
+                                .font(.subheadline)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section("Daily Limit") {
+                    Stepper("\(minutes) min/day", value: $minutes, in: 1...480, step: 5)
+                    Slider(value: Binding(
+                        get: { Double(minutes) },
+                        set: { minutes = Int($0) }
+                    ), in: 1...480, step: 1)
+                }
+
+                Section {
+                    Toggle("Enabled", isOn: $enabled)
+                } footer: {
+                    Text("Disable temporarily without losing the limit. When enabled, apps shield automatically at the daily threshold and reset at midnight.")
+                        .font(.caption)
+                }
+
+                if isEditing {
+                    Section {
+                        Button("Delete Limit", role: .destructive, action: onDelete)
+                    }
+                }
+            }
+            .navigationTitle(isEditing ? "Edit Time Limit" : "New Time Limit")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        var updated = initial
+                        updated.displayName = name.trimmingCharacters(in: .whitespaces)
+                        updated.timeLimitMinutes = minutes
+                        updated.enabled = enabled
+                        #if !targetEnvironment(simulator)
+                        if let data = try? JSONEncoder().encode(selection) {
+                            updated.selectionData = data.base64EncodedString()
+                        }
+                        #endif
+                        onSave(updated)
+                    }
+                    .disabled(!canSave)
+                }
+            }
+            #if !targetEnvironment(simulator)
+            .sheet(isPresented: $showingPicker) {
+                NavigationStack {
+                    FamilyActivityPicker(selection: $selection)
+                        .navigationTitle("Pick Apps")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showingPicker = false }
+                            }
+                        }
+                }
+            }
+            #endif
+        }
+    }
+}
 
 // MARK: - Block Chip (used in DNSTab Safety view)
 

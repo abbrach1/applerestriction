@@ -83,10 +83,30 @@ enum WebFilterMode: String, Codable {
 
 struct AppTimeLimit: Codable, Identifiable, Hashable {
     var id: String = UUID().uuidString
-    var appToken: String
+    /// Legacy single-app token, kept for decoding old records. New limits use
+    /// `selectionData` so a single limit can cover multiple apps / categories.
+    var appToken: String = ""
+    /// Base64-encoded JSON of the `FamilyActivitySelection` the admin picked
+    /// for this limit. Nil if this is a legacy record that still uses
+    /// `appToken`.
+    var selectionData: String? = nil
     var displayName: String
     var timeLimitMinutes: Int
     var isCategory: Bool = false
+    var enabled: Bool = true
+}
+
+extension AppTimeLimit {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id               = try c.decodeIfPresent(String.self, forKey: .id)               ?? UUID().uuidString
+        appToken         = try c.decodeIfPresent(String.self, forKey: .appToken)         ?? ""
+        selectionData    = try c.decodeIfPresent(String.self, forKey: .selectionData)    ?? nil
+        displayName      = try c.decodeIfPresent(String.self, forKey: .displayName)      ?? ""
+        timeLimitMinutes = try c.decodeIfPresent(Int.self,    forKey: .timeLimitMinutes) ?? 30
+        isCategory       = try c.decodeIfPresent(Bool.self,   forKey: .isCategory)       ?? false
+        enabled          = try c.decodeIfPresent(Bool.self,   forKey: .enabled)          ?? true
+    }
 }
 
 // MARK: - Downtime Schedule

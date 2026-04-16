@@ -7,7 +7,7 @@ import FamilyControls
 class SharedDefaults {
     static let shared = SharedDefaults()
 
-    private let suiteName = "group.com.screentime.control"
+    private let suiteName = AppConstants.appGroupIdentifier
 
     private var defaults: UserDefaults {
         UserDefaults(suiteName: suiteName) ?? .standard

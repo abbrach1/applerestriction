@@ -3,6 +3,7 @@
 import Foundation
 import ManagedSettings
 import FamilyControls
+import DeviceActivity
 import Combine
 
 @MainActor
@@ -132,6 +133,80 @@ class ScreenTimeSettingsManager: ObservableObject {
         saveConfiguration()
     }
 
+    /// Enforce the current set of per-app time limits.
+    ///
+    /// Strategy:
+    ///   1. Stop monitoring for limits that were removed / disabled / had their
+    ///      minutes changed (Screen Time requires a stop + start pair to pick
+    ///      up a new threshold).
+    ///   2. For each enabled limit, decode its FamilyActivitySelection, write
+    ///      it to the shared App Group so the DeviceActivityMonitor extension
+    ///      can read it when the threshold fires, and call
+    ///      DeviceActivityCenter.startMonitoring with a daily schedule.
+    ///   3. Clear any shield from a previous day so the limit starts fresh.
+    ///
+    /// The extension (DeviceActivityMonitorExtension) is what actually shields
+    /// the apps when a threshold is reached; this main-app method only
+    /// configures what to monitor.
+    func applyAppTimeLimits(_ limits: [AppTimeLimit]) {
+        let center = DeviceActivityCenter()
+        let defaults = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+
+        // Tear down monitors for limits that are no longer active so the
+        // extension doesn't keep stale thresholds around.
+        let knownIDs = Set(defaults?.stringArray(forKey: "bsafe.limit.ids") ?? [])
+        let currentIDs = Set(limits.filter(\.enabled).map(\.id))
+
+        for removedID in knownIDs.subtracting(currentIDs) {
+            center.stopMonitoring([.limit(removedID)])
+            defaults?.removeObject(forKey: "bsafe.limit.\(removedID).selection")
+            defaults?.removeObject(forKey: "bsafe.limit.\(removedID).minutes")
+            // Clear any shield the old limit applied.
+            ManagedSettingsStore(named: .limit(removedID)).clearAllSettings()
+        }
+        defaults?.set(Array(currentIDs), forKey: "bsafe.limit.ids")
+
+        let schedule = DeviceActivitySchedule(
+            intervalStart: DateComponents(hour: 0,  minute: 0),
+            intervalEnd:   DateComponents(hour: 23, minute: 59),
+            repeats: true)
+
+        for limit in limits where limit.enabled && limit.timeLimitMinutes > 0 {
+            guard let selectionB64 = limit.selectionData,
+                  let data = Data(base64Encoded: selectionB64),
+                  let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data),
+                  !(selection.applicationTokens.isEmpty && selection.categoryTokens.isEmpty && selection.webDomainTokens.isEmpty)
+            else { continue }
+
+            // Hand the selection to the extension. We store the raw JSON so
+            // the extension can decode it into a FamilyActivitySelection too.
+            defaults?.set(data, forKey: "bsafe.limit.\(limit.id).selection")
+            defaults?.set(limit.timeLimitMinutes, forKey: "bsafe.limit.\(limit.id).minutes")
+
+            let event = DeviceActivityEvent(
+                applications: selection.applicationTokens,
+                categories:   selection.categoryTokens,
+                webDomains:   selection.webDomainTokens,
+                threshold:    DateComponents(minute: limit.timeLimitMinutes))
+
+            // Make sure yesterday's shield (if any) is cleared so today's
+            // budget starts fresh.
+            ManagedSettingsStore(named: .limit(limit.id)).clearAllSettings()
+
+            // Restart monitoring with the current threshold. Calling start
+            // twice with the same activity name is an error — stop first.
+            center.stopMonitoring([.limit(limit.id)])
+            do {
+                try center.startMonitoring(
+                    .limit(limit.id),
+                    during: schedule,
+                    events: [.limitReached(limit.id): event])
+            } catch {
+                print("[B-SAFE] startMonitoring failed for \(limit.displayName): \(error)")
+            }
+        }
+    }
+
     // MARK: - Lock / Unlock All
 
     func lockAllApps() {
@@ -230,6 +305,7 @@ class ScreenTimeSettingsManager: ObservableObject {
         // App restrictions first, website restrictions last (so website blocking isn't overwritten)
         applyAppRestrictions()
         applyWebsiteRestrictions()
+        applyAppTimeLimits(config.appTimeLimits)
 
         // Safari Content Blocker — always apply rules based on config.
         // This is the DNS-independent enforcement path for Safari. The
