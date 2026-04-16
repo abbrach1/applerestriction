@@ -2481,15 +2481,11 @@ struct DNSTab: View {
                                 }
                             } icon: { Image(systemName: "bell.badge.fill").foregroundStyle(.orange) }
                         }
-                        Toggle(isOn: $vm.config.dnsAutoReapply) {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Auto Re-Apply If Removed").font(.subheadline).fontWeight(.medium)
-                                    Text("Attempts to reinstall the profile automatically (child must approve)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            } icon: { Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.green) }
-                        }
+                        // Auto-reapply has been removed: the child must restore DNS
+                        // manually from iOS Settings so the removal password stays
+                        // meaningful. While DNS is off, the child device fires a
+                        // notification every 10 seconds and re-alerts the admin hourly
+                        // via email + push.
                         VStack(alignment: .leading, spacing: 4) {
                             Label {
                                 VStack(alignment: .leading, spacing: 2) {

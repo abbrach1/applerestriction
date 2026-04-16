@@ -247,29 +247,26 @@ struct ChildDeviceView: View {
 
     @ViewBuilder private func pendingSection(config: ScreenTimeConfiguration) -> some View {
         if syncService.dnsProtectionMissing && config.forceDNS {
-            HStack(spacing: 12) {
-                Image(systemName: "network.slash").font(.title3).foregroundStyle(.white)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("DNS Protection Disabled").font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
-                    Text("Go to Settings → General → VPN & Device Management → B-SAFE DNS → Install").font(.caption).foregroundStyle(.white.opacity(0.85))
+            // DNS must be restored manually via Settings — no in-app "Restore"
+            // button. An in-app shortcut would let the child toggle protection
+            // off and back on trivially; forcing Settings navigation keeps the
+            // admin-set removal password meaningful.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Image(systemName: "network.slash").font(.title3).foregroundStyle(.white)
+                    Text("DNS Protection Disabled")
+                        .font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
+                    Spacer()
                 }
-                Spacer()
-                Button("Restore") {
-                    Task {
-                        #if !targetEnvironment(simulator)
-                        await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID, removalPassword: config.dnsRemovalPassword)
-                        let ok = await ContentBlockerService.shared.isDNSEnabled()
-                        await MainActor.run { syncService.dnsProtectionMissing = !ok }
-                        if ok { syncService.cancelDNSTamperAlerts() }
-                        #endif
-                    }
-                }
-                .font(.caption).fontWeight(.semibold)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(.white)
+                Text("You must restore it manually:")
+                    .font(.caption).foregroundStyle(.white.opacity(0.85))
+                Text("Settings → General → VPN & Device Management → B-SAFE DNS → Install")
+                    .font(.caption).fontWeight(.medium).foregroundStyle(.white)
+                Text("Alerts will keep firing every 10 seconds until you do.")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.75))
             }
             .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.red, in: RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal)
         }

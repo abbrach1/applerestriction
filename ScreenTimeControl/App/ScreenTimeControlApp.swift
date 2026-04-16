@@ -117,8 +117,12 @@ struct ScreenTimeControlApp: App {
         scheduleChildSync() // reschedule immediately
 
         let work = Task {
-            // Re-check DNS profile and run a full sync to pick up any admin commands
+            // Re-check DNS profile, re-check Safari Content Blocker + NEFilter,
+            // and run a full sync to pick up any admin commands. Each call
+            // refills its 10-second notification queue when still tampered and
+            // re-fires the hourly admin email + FCM + Firebase alert as needed.
             await syncService.recheckDNSOnForeground()
+            await syncService.recheckWebFilterOnForeground()
             await syncService.manualSync()
             task.setTaskCompleted(success: true)
         }

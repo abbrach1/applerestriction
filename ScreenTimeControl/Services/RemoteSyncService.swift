@@ -58,6 +58,15 @@ class RemoteSyncService: ObservableObject {
     }
 
     #if !targetEnvironment(simulator)
+    /// Unified DNS-tamper check. Called on foreground, BGAppRefreshTask, and
+    /// whenever Firebase settings change. Re-schedules the child-facing 10-second
+    /// notification queue whenever DNS is off, and (at most once per hour) writes
+    /// a fresh TamperAlert + email + FCM push so the admin keeps getting notified
+    /// for as long as the child leaves DNS disabled.
+    ///
+    /// Restoration is intentionally not attempted from inside the app — the child
+    /// must go to Settings manually so the removal password set by the admin
+    /// stays meaningful.
     func recheckDNSOnForeground() async {
         guard let uid = Auth.auth().currentUser?.uid,
               let snapshot = try? await Database.database()
@@ -67,45 +76,26 @@ class RemoteSyncService: ObservableObject {
               let data = try? JSONSerialization.data(withJSONObject: config),
               let settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data),
               settings.forceDNS else { return }
+
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        guard !isEnabled else {
-            // DNS is healthy — clear any stale tamper alerts
+        if isEnabled {
             cancelDNSTamperAlerts()
+            clearAdminAlertMark(type: "dns_removed")
             await MainActor.run { self.dnsProtectionMissing = false }
             return
         }
 
-        // Attempt reapply — iOS may require user consent via a system dialog,
-        // so we verify afterwards whether it actually took effect.
-        if settings.dnsAutoReapply {
-            await ContentBlockerService.shared.enableForcedDNS(profileID: settings.nextDNSProfileID, removalPassword: settings.dnsRemovalPassword)
-        }
+        // DNS is off — keep the 10-second user-facing notification queue primed
+        // and, if enough time has passed, re-alert the admin.
+        scheduleDNSTamperAlerts()
+        await MainActor.run { self.dnsProtectionMissing = true }
 
-        // Check whether reapply actually succeeded
-        let nowEnabled = await ContentBlockerService.shared.isDNSEnabled()
-
-        // Alert admin with accurate status
-        if settings.dnsAlertOnRemoval {
-            let message = nowEnabled
-                ? "DNS filter was removed and has been automatically restored."
-                : "DNS filter was removed. Automatic restore failed — the child may have declined the prompt. Manual action required."
-            let alert = TamperAlert(type: "dns_removed", message: message, timestamp: Date())
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .millisecondsSince1970
-            if let d = try? encoder.encode(alert),
-               let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-                _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
-            }
-            let subject = nowEnabled ? "B-SAFE: DNS Protection Restored" : "B-SAFE: DNS Protection Removed"
-            await sendEmailAlert(subject: subject, body: "Device: \(UIDevice.current.name)\n\(message)")
-        }
-
-        if !nowEnabled {
-            scheduleDNSTamperAlerts()
-            await MainActor.run { self.dnsProtectionMissing = true }
-        } else {
-            cancelDNSTamperAlerts()
-            await MainActor.run { self.dnsProtectionMissing = false }
+        if settings.dnsAlertOnRemoval, shouldResendAdminAlert(type: "dns_removed") {
+            let message = "DNS filter has been removed from this device. The child must restore it manually: Settings → General → VPN & Device Management → B-SAFE DNS → Install."
+            await sendAdminTamperAlert(uid: uid,
+                                       type: "dns_removed",
+                                       subject: "B-SAFE: DNS Protection Removed",
+                                       message: message)
         }
     }
     #else
@@ -372,10 +362,9 @@ class RemoteSyncService: ObservableObject {
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         _ = try? await dbRef.child("users/\(uid)/unlockRequests").childByAutoId().setValue(dict)
         let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
-        await sendFCMToAdmin(
-            title: "🔓 Unlock Request",
-            body: "\(name)\(reason.isEmpty ? " is requesting an unlock" : ": \(reason)")"
-        )
+        let body = "\(name)\(reason.isEmpty ? " is requesting an unlock" : ": \(reason)")"
+        await sendFCMToAdmin(title: "🔓 Unlock Request", body: body)
+        await sendEmailAlert(subject: "B-SAFE: Unlock Request", body: body)
     }
 
     func cancelUnlockRequest() async {
@@ -406,10 +395,9 @@ class RemoteSyncService: ObservableObject {
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         _ = try? await dbRef.child("users/\(uid)/websiteRequests").childByAutoId().setValue(dict)
         let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
-        await sendFCMToAdmin(
-            title: "🌐 Website Request",
-            body: "\(name) wants access to \(clean)\(reason.isEmpty ? "" : " — \(reason)")"
-        )
+        let body = "\(name) wants access to \(clean)\(reason.isEmpty ? "" : " — \(reason)")"
+        await sendFCMToAdmin(title: "🌐 Website Request", body: body)
+        await sendEmailAlert(subject: "B-SAFE: Website Request", body: body)
     }
 
     func cancelWebsiteRequest(key: String) async {
@@ -588,90 +576,88 @@ class RemoteSyncService: ObservableObject {
     // MARK: - Private: DNS Tamper Detection
 
     private func checkDNSTamper(config: ScreenTimeConfiguration, uid: String) async {
-        guard config.forceDNS, config.dnsAlertOnRemoval || config.dnsAutoReapply else { return }
+        guard config.forceDNS, config.dnsAlertOnRemoval else { return }
         #if !targetEnvironment(simulator)
         let isEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        guard !isEnabled else {
+        if isEnabled {
             dnsProtectionMissing = false
+            cancelDNSTamperAlerts()
+            clearAdminAlertMark(type: "dns_removed")
             return
         }
 
-        if config.dnsAutoReapply {
-            await ContentBlockerService.shared.enableForcedDNS(profileID: config.nextDNSProfileID, removalPassword: config.dnsRemovalPassword)
-        }
+        dnsProtectionMissing = true
+        scheduleDNSTamperAlerts()
 
-        let nowEnabled = await ContentBlockerService.shared.isDNSEnabled()
-        dnsProtectionMissing = !nowEnabled
-
-        if config.dnsAlertOnRemoval {
-            let message = nowEnabled
-                ? "DNS filter was removed and has been automatically restored."
-                : "DNS filter was removed. Automatic restore failed — child may have declined. Manual action required."
-            let alert = TamperAlert(type: "dns_removed", message: message, timestamp: Date())
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .millisecondsSince1970
-            if let data = try? encoder.encode(alert),
-               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
-            }
-            let subject = nowEnabled ? "B-SAFE: DNS Protection Restored" : "B-SAFE: DNS Protection Removed"
-            await sendEmailAlert(subject: subject, body: "Device: \(UIDevice.current.name)\n\(message)")
-        }
-
-        if !nowEnabled {
-            scheduleDNSTamperAlerts()
-        } else {
-            cancelDNSTamperAlerts()
+        if shouldResendAdminAlert(type: "dns_removed") {
+            let message = "DNS filter has been removed from this device. The child must restore it manually: Settings → General → VPN & Device Management → B-SAFE DNS → Install."
+            await sendAdminTamperAlert(uid: uid,
+                                       type: "dns_removed",
+                                       subject: "B-SAFE: DNS Protection Removed",
+                                       message: message)
         }
         #endif
     }
 
-    // MARK: - DNS Tamper Notifications
+    // MARK: - Tamper Notification Queue (shared)
 
-    /// Fire an immediate critical alert plus follow-ups every 60 s (up to 5 total)
-    /// so the child can't simply ignore the notification and walk away.
-    /// Uses the criticalAlert entitlement when approved by Apple; falls back to
-    /// timeSensitive (bypasses Focus modes) otherwise.
-    private func scheduleDNSTamperAlerts() {
+    // iOS caps pending local notifications at 64 per app. We leave one slot
+    // free for the admin-push pipeline and fill the remaining 63 with
+    // 10-second-spaced reminders. The queue drains in ~10.5 minutes; the
+    // BGAppRefreshTask and every foreground refill it as soon as iOS gives
+    // the app CPU time, which is the best we can do without a server-side
+    // push pipeline.
+    private static let tamperSlotCount = 63
+    private static let tamperSlotInterval: TimeInterval = 10
+
+    private func scheduleTamperAlerts(prefix: String, title: String, body: String, critical: Bool) {
         let center = UNUserNotificationCenter.current()
-        // Cancel any stale series first
-        center.removePendingNotificationRequests(withIdentifiers:
-            (0..<5).map { "bsafe.dns.tamper.\($0)" })
+        let ids = (0..<Self.tamperSlotCount).map { "\(prefix).\($0)" }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
 
-        for i in 0..<5 {
+        for i in 0..<Self.tamperSlotCount {
             let content = UNMutableNotificationContent()
-            content.title = "⚠️ Internet Protection Disabled"
-            content.body = i == 0
-                ? "DNS protection was removed. To restore: Settings → General → VPN & Device Management → B-SAFE DNS → Install."
-                : "DNS protection is still off. Go to Settings → General → VPN & Device Management → B-SAFE DNS → Install."
-            content.sound = .defaultCritical
-            content.interruptionLevel = .critical
+            content.title = title
+            content.body  = body
+            content.sound = critical ? .defaultCritical : .default
+            content.interruptionLevel = critical ? .critical : .timeSensitive
             content.badge = NSNumber(value: 1)
 
-            let trigger = i == 0 ? nil : UNTimeIntervalNotificationTrigger(
-                timeInterval: Double(i) * 60, repeats: false)
+            // First fires in 1 s, then every 10 s (1, 11, 21, 31, …).
+            let offset = max(1, Double(i) * Self.tamperSlotInterval)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: offset, repeats: false)
             let req = UNNotificationRequest(
-                identifier: "bsafe.dns.tamper.\(i)",
+                identifier: "\(prefix).\(i)",
                 content: content,
                 trigger: trigger)
-            UNUserNotificationCenter.current().add(req) { _ in }
+            center.add(req) { _ in }
         }
     }
 
-    /// Cancel all pending DNS tamper notifications (called when DNS is restored).
-    func cancelDNSTamperAlerts() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers:
-            (0..<5).map { "bsafe.dns.tamper.\($0)" })
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:
-            (0..<5).map { "bsafe.dns.tamper.\($0)" })
+    private func cancelTamperAlerts(prefix: String) {
+        let ids = (0..<Self.tamperSlotCount).map { "\(prefix).\($0)" }
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
+
+    /// Keep the DNS-tamper queue full (63 notifications at 10 s intervals).
+    private func scheduleDNSTamperAlerts() {
+        scheduleTamperAlerts(
+            prefix: "bsafe.dns.tamper",
+            title: "⚠️ Internet Protection Disabled",
+            body:  "DNS protection is off. Restore it in Settings → General → VPN & Device Management → B-SAFE DNS → Install.",
+            critical: true)
+    }
+
+    /// Cancel all pending DNS tamper notifications (called when DNS is restored).
+    func cancelDNSTamperAlerts() { cancelTamperAlerts(prefix: "bsafe.dns.tamper") }
 
     // MARK: - Web Filter Tamper Detection
 
     /// Re-check whether the Safari Content Blocker + NEFilter are still enforcing
-    /// the website list. Called on foreground and after every settings update.
-    /// Sends a TamperAlert to the admin if either was turned off by the child
-    /// while web restrictions are active.
+    /// the website list. Called on foreground, on every settings update, and from
+    /// the background-refresh task.
     func recheckWebFilterOnForeground() async {
         #if !targetEnvironment(simulator)
         guard let uid = Auth.auth().currentUser?.uid,
@@ -689,11 +675,11 @@ class RemoteSyncService: ObservableObject {
 
     private func checkWebFilterTamper(config: ScreenTimeConfiguration, uid: String) async {
         #if !targetEnvironment(simulator)
-        // Only care if there's an active website filter to enforce.
         let hasRestrictions = config.websiteFilterMode == .whitelist || !config.blockedWebsites.isEmpty
         guard hasRestrictions else {
             webFilterProtectionMissing = false
             cancelWebFilterTamperAlerts()
+            clearAdminAlertMark(type: "web_filter_disabled")
             return
         }
 
@@ -702,73 +688,93 @@ class RemoteSyncService: ObservableObject {
         let safariOn = blockerState?.isEnabled ?? false
         let filterOn = await ContentFilterService.shared.isEnabled()
 
-        // If NEFilter is active, domain enforcement is still system-wide even if the
-        // Safari extension is disabled. Still alert the admin, but don't fail-safe.
         if safariOn && filterOn {
             webFilterProtectionMissing = false
             cancelWebFilterTamperAlerts()
+            clearAdminAlertMark(type: "web_filter_disabled")
             return
         }
 
         webFilterProtectionMissing = true
 
         let message: String
-        if !safariOn && !filterOn {
-            message = "Website filter completely disabled. Both the Safari Content Blocker and the Network Filter were turned off — the child can browse without restrictions. Manual action required."
+        let bothOff = !safariOn && !filterOn
+        if bothOff {
+            message = "Website filter completely disabled. Both the Safari Content Blocker and the Network Filter were turned off — the child can browse without restrictions."
         } else if !filterOn {
             message = "Network Filter was turned off. Safari is still filtered, but other apps and browsers can bypass the website list."
         } else {
             message = "Safari Content Blocker was turned off. The Network Filter is still enforcing the website list system-wide, but Safari-specific rules are not active."
         }
 
-        let alert = TamperAlert(type: "web_filter_disabled", message: message, timestamp: Date())
+        scheduleWebFilterTamperAlerts(bothOff: bothOff)
+
+        if shouldResendAdminAlert(type: "web_filter_disabled") {
+            await sendAdminTamperAlert(uid: uid,
+                                       type: "web_filter_disabled",
+                                       subject: "B-SAFE: Website Filter Disabled",
+                                       message: message)
+        }
+        #endif
+    }
+
+    private func scheduleWebFilterTamperAlerts(bothOff: Bool) {
+        scheduleTamperAlerts(
+            prefix: "bsafe.webfilter.tamper",
+            title: "⚠️ Website Filter Disabled",
+            body: bothOff
+                ? "Re-enable B-SAFE Content Blocker (Settings → Safari → Extensions) AND the Network Filter (Settings → General → VPN & Device Management → B-SAFE Content Filter)."
+                : "A website filter component is off. Open the B-SAFE setup checklist to restore protection.",
+            critical: false)
+    }
+
+    func cancelWebFilterTamperAlerts() { cancelTamperAlerts(prefix: "bsafe.webfilter.tamper") }
+
+    // MARK: - Admin Tamper Alert Dispatch
+
+    /// Maximum frequency at which we re-notify the admin about an ongoing
+    /// tamper condition. Set to 1 hour — if the child leaves DNS off for 12
+    /// hours, the admin gets 12 emails + 12 FCM pushes + 12 Firebase alerts.
+    private static let adminTamperResendInterval: TimeInterval = 3600
+
+    private func shouldResendAdminAlert(type: String) -> Bool {
+        let last = UserDefaults.standard.double(forKey: "bsafe.tamper.lastAdminAlert.\(type)")
+        return last == 0 || Date().timeIntervalSince1970 - last >= Self.adminTamperResendInterval
+    }
+
+    private func markAdminAlertSent(type: String) {
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: "bsafe.tamper.lastAdminAlert.\(type)")
+    }
+
+    private func clearAdminAlertMark(type: String) {
+        UserDefaults.standard.removeObject(forKey: "bsafe.tamper.lastAdminAlert.\(type)")
+    }
+
+    /// Fire all three admin-facing channels for a tamper event: a Firebase
+    /// TamperAlert row (dashboard banner), a SendGrid email, and an FCM push to
+    /// the admin device. Rate-limited to once per hour per tamper type via
+    /// `shouldResendAdminAlert`.
+    private func sendAdminTamperAlert(uid: String, type: String, subject: String, message: String) async {
+        let device = UIDevice.current.name
+        let body = "Device: \(device)\n\(message)"
+
+        // 1. Firebase TamperAlert — shows up in the admin dashboard banner.
+        let alert = TamperAlert(type: type, message: message, timestamp: Date())
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .millisecondsSince1970
         if let d = try? encoder.encode(alert),
            let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
             _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
         }
-        await sendEmailAlert(subject: "B-SAFE: Website Filter Disabled",
-                             body: "Device: \(UIDevice.current.name)\n\(message)")
 
-        scheduleWebFilterTamperAlerts(bothOff: !safariOn && !filterOn)
-        #endif
-    }
+        // 2. Email via SendGrid.
+        await sendEmailAlert(subject: subject, body: body)
 
-    private func scheduleWebFilterTamperAlerts(bothOff: Bool) {
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers:
-            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
+        // 3. Push notification to admin device via FCM HTTP v1 API.
+        await sendFCMToAdmin(title: subject, body: body)
 
-        for i in 0..<5 {
-            let content = UNMutableNotificationContent()
-            content.title = "⚠️ Website Filter Disabled"
-            content.body = bothOff
-                ? (i == 0
-                    ? "Website filter is off. Re-enable B-SAFE Content Blocker (Settings → Safari → Extensions) and the Network Filter (Settings → General → VPN & Device Management → B-SAFE Content Filter)."
-                    : "Website filter is still off. Re-enable B-SAFE Content Blocker in Safari Extensions and the Network Filter.")
-                : (i == 0
-                    ? "A website filter component is off. Open the B-SAFE setup checklist to restore protection."
-                    : "Website filter is still partially disabled. Open the B-SAFE setup checklist to restore protection.")
-            content.sound = .defaultCritical
-            content.interruptionLevel = .timeSensitive
-            content.badge = NSNumber(value: 1)
-
-            let trigger = i == 0 ? nil : UNTimeIntervalNotificationTrigger(
-                timeInterval: Double(i) * 60, repeats: false)
-            let req = UNNotificationRequest(
-                identifier: "bsafe.webfilter.tamper.\(i)",
-                content: content,
-                trigger: trigger)
-            UNUserNotificationCenter.current().add(req) { _ in }
-        }
-    }
-
-    func cancelWebFilterTamperAlerts() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers:
-            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:
-            (0..<5).map { "bsafe.webfilter.tamper.\($0)" })
+        markAdminAlertSent(type: type)
     }
 
     // MARK: - Email Alerts (SendGrid)
