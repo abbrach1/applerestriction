@@ -35,6 +35,8 @@
 		A10050 /* SafeBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10050 /* SafeBrowserView.swift */; };
 		BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10060 /* ContentFilterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10060 /* ContentFilterService.swift */; };
+		A10070 /* FCMv1Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10070 /* FCMv1Service.swift */; };
+		A10071 /* MobileConfigService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10071 /* MobileConfigService.swift */; };
 		EE1100000000000000000009 /* BSAFEContentFilter.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = EE1100000000000000000002 /* BSAFEContentFilter.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -115,6 +117,8 @@
 		BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BSAFEContentBlocker.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		EE1100000000000000000002 /* BSAFEContentFilter.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BSAFEContentFilter.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10060 /* ContentFilterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentFilterService.swift; sourceTree = "<group>"; };
+		B10070 /* FCMv1Service.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FCMv1Service.swift; sourceTree = "<group>"; };
+		B10071 /* MobileConfigService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConfigService.swift; sourceTree = "<group>"; };
 		C10000 /* ScreenTimeControl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScreenTimeControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000 /* DeviceActivityMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DeviceActivityMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C30000 /* ShieldConfiguration.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShieldConfiguration.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -227,6 +231,8 @@
 				B10040 /* ContentBlockerService.swift */,
 				B10051 /* NextDNSService.swift */,
 				B10060 /* ContentFilterService.swift */,
+				B10070 /* FCMv1Service.swift */,
+				B10071 /* MobileConfigService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -508,6 +514,8 @@
 				A10050 /* SafeBrowserView.swift in Sources */,
 				A10051 /* NextDNSService.swift in Sources */,
 				A10060 /* ContentFilterService.swift in Sources */,
+				A10070 /* FCMv1Service.swift in Sources */,
+				A10071 /* MobileConfigService.swift in Sources */,
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,
