@@ -275,6 +275,7 @@ struct ChildDeviceView: View {
                           title: "Website filter not active",
                           detail: "Go to Settings → Safari → Extensions → enable B-SAFE Content Blocker")
         }
+        captiveBypassCard(config: config)
         if !syncService.pendingWebsites.isEmpty {
             let websiteItems = Array(syncService.pendingWebsites)
             pendingCard(header: "Websites from Admin", icon: "globe.badge.exclamationmark") {
@@ -488,6 +489,61 @@ struct ChildDeviceView: View {
             return String((words[0].first ?? "?")).uppercased() + String((words[1].first ?? "?")).uppercased()
         }
         return String(displayedName.prefix(2)).uppercased()
+    }
+
+    @ViewBuilder
+    private func captiveBypassCard(config: ScreenTimeConfiguration) -> some View {
+        // When a window is already open — show countdown + close button.
+        if syncService.captiveBypassUntil > Date().timeIntervalSince1970 {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi.exclamationmark").font(.title3).foregroundStyle(.white)
+                    Text("Captive WiFi bypass active")
+                        .font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
+                    Spacer()
+                }
+                Text("Website filters are paused so you can log in to the WiFi. Your admin has been notified.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.85))
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    let remaining = max(0, syncService.captiveBypassUntil - ctx.date.timeIntervalSince1970)
+                    Text("\(Int(remaining) / 60)m \(Int(remaining) % 60)s remaining")
+                        .font(.caption2).foregroundStyle(.white)
+                }
+                Button {
+                    Task { await syncService.closeCaptiveBypass() }
+                } label: {
+                    Text("Close Now")
+                        .font(.caption).fontWeight(.semibold)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                        .foregroundStyle(.white)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal)
+        } else if config.captiveBypassAllowed {
+            Button {
+                Task { await syncService.openCaptiveBypass(minutes: max(1, config.captiveBypassMinutes)) }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi").foregroundStyle(.white).font(.title3)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Connect to Captive WiFi")
+                            .font(.subheadline).fontWeight(.semibold).foregroundStyle(.white)
+                        Text("Opens a \(max(1, config.captiveBypassMinutes))-minute window so you can sign in to hotel / airport / cafe WiFi. Your admin gets notified.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.85))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.blue, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal)
+        }
     }
 
     @ViewBuilder

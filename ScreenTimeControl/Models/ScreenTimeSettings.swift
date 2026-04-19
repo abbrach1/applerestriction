@@ -36,6 +36,18 @@ struct ScreenTimeConfiguration: Codable, Identifiable {
     var blockedDNSServices: [String] = []   // NextDNS service IDs to block, e.g. ["tiktok"]
     var blockedDNSCategories: [String] = [] // NextDNS category IDs to block, e.g. ["porn"]
     var browserEnabled: Bool = true         // show/hide the B-SAFE Browser tab for child
+
+    // MARK: Captive Portal Bypass
+    //
+    // Kids routinely need to get past hotel / airport / coffeeshop captive
+    // portals whose login pages live on thousands of different, unpredictable
+    // domains. Rather than trying to allowlist every captive auth page, the
+    // child hits a button in the B-SAFE app which opens a short "bypass
+    // window" during which NEFilter + Safari Content Blocker pass everything,
+    // then snap back automatically. Every opening alerts the admin.
+    var captiveBypassAllowed: Bool = true     // admin master toggle
+    var captiveBypassMinutes: Int  = 5        // window length when opened
+    var captiveBypassUntil: Double = 0        // epoch seconds; 0 = inactive
 }
 
 // Custom decode in extension — preserves synthesized init() and memberwise init
@@ -69,6 +81,9 @@ extension ScreenTimeConfiguration {
         blockedDNSServices     = try c.decodeIfPresent([String].self, forKey: .blockedDNSServices)     ?? []
         blockedDNSCategories   = try c.decodeIfPresent([String].self, forKey: .blockedDNSCategories)   ?? []
         browserEnabled         = try c.decodeIfPresent(Bool.self,     forKey: .browserEnabled)         ?? true
+        captiveBypassAllowed   = try c.decodeIfPresent(Bool.self,     forKey: .captiveBypassAllowed)   ?? true
+        captiveBypassMinutes   = try c.decodeIfPresent(Int.self,      forKey: .captiveBypassMinutes)   ?? 5
+        captiveBypassUntil     = try c.decodeIfPresent(Double.self,   forKey: .captiveBypassUntil)     ?? 0
     }
 }
 

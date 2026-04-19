@@ -160,6 +160,26 @@
             </label>
           </div>
 
+          <div class="card">
+            <div class="card-header"><h2>Captive WiFi Bypass</h2></div>
+            <label class="row-toggle">
+              <span>
+                <strong>Allow captive WiFi bypass</strong>
+                <small>Gives the child a button in the app that opens a short window passing all traffic, so they can log in to hotel / airport / cafe WiFi. Every bypass alerts you.</small>
+              </span>
+              <input type="checkbox" id="toggle-captive-allowed" />
+            </label>
+            <label class="field" id="captive-duration-field">
+              <span>Window length (minutes)</span>
+              <input id="captive-minutes" type="number" min="1" max="15" step="1" value="5" />
+            </label>
+            <div id="captive-active" class="captive-active hidden">
+              <strong>⚠️ Bypass active</strong>
+              <span id="captive-countdown">—</span>
+              <button id="captive-close-now" class="btn btn-danger">Close Now</button>
+            </div>
+          </div>
+
           <button class="btn btn-primary full" id="apply-websites">Apply Website Settings</button>
         </section>
 

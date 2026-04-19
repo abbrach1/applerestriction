@@ -123,6 +123,14 @@ class ContentBlockerService {
     }
 
     private func buildRules(for config: ScreenTimeConfiguration) -> [Rule] {
+        // Captive-portal bypass takes precedence over everything. Emit an
+        // empty rule set so Safari passes every request while the window
+        // is open. The child app flips back to the real rules when the
+        // window closes.
+        if config.captiveBypassUntil > Date().timeIntervalSince1970 {
+            return []
+        }
+
         // If the device is locked or downtime is active — block everything
         if config.isLocked {
             return [blockAll()]

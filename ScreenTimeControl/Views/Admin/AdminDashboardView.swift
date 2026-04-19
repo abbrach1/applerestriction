@@ -1578,6 +1578,50 @@ struct WebsiteTab: View {
                     .font(.caption)
             }
 
+            // Captive portal bypass controls — master toggle + configurable
+            // duration + live status. When the child hits "Connect to
+            // Captive WiFi" on their phone, this section shows the
+            // countdown and a force-close button for the admin.
+            Section {
+                Toggle(isOn: $vm.config.captiveBypassAllowed) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Allow Captive WiFi Bypass").font(.subheadline).fontWeight(.medium)
+                            Text("Child can open a short window that passes all traffic so they can log in to hotel / airport WiFi.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "wifi").foregroundStyle(.blue) }
+                }
+                if vm.config.captiveBypassAllowed {
+                    Stepper("Window: \(vm.config.captiveBypassMinutes) min",
+                            value: $vm.config.captiveBypassMinutes, in: 1...15, step: 1)
+                }
+                if vm.config.captiveBypassUntil > Date().timeIntervalSince1970 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bypass active").font(.subheadline).fontWeight(.medium)
+                            Text("Closes \(Date(timeIntervalSince1970: vm.config.captiveBypassUntil), style: .relative)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Close Now") {
+                            Task {
+                                vm.config.captiveBypassUntil = 0
+                                let token = await auth.freshToken() ?? ""
+                                await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
+                            }
+                        }
+                        .font(.caption).fontWeight(.semibold)
+                    }
+                }
+            } header: {
+                Text("Captive WiFi Bypass")
+            } footer: {
+                Text("Every bypass alerts you via email + push. Disable the toggle to remove the option from the child's device entirely.")
+                    .font(.caption)
+            }
+
             // 6. Child Device Setup Status (bottom, secondary)
             if let info = vm.websiteSetupInfo {
                 Section {

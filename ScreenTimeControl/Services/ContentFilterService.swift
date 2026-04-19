@@ -83,6 +83,19 @@ class ContentFilterService {
         defaults.set(config.allowedWebsites,                    forKey: "bsafe.filter.allowedDomains")
         defaults.set(config.websiteFilterMode == .whitelist,    forKey: "bsafe.filter.whitelist")
         defaults.set(config.isLocked,                           forKey: "bsafe.filter.locked")
+        defaults.set(config.captiveBypassUntil,                 forKey: "bsafe.filter.captiveBypassUntil")
     }
+
+    /// Opens the captive-portal bypass window by writing the epoch seconds
+    /// the window should end at. NEFilter reads this on every flow so it
+    /// picks up the change without needing a preferences save (which would
+    /// restart the extension and cost seconds at the worst possible moment —
+    /// right when the kid is trying to auth to the hotel WiFi).
+    func openCaptiveBypass(until: TimeInterval) {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+        defaults.set(until, forKey: "bsafe.filter.captiveBypassUntil")
+    }
+
+    func closeCaptiveBypass() { openCaptiveBypass(until: 0) }
 }
 #endif

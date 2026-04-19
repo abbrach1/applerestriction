@@ -20,6 +20,12 @@ class ContentFilterProvider: NEFilterDataProvider {
     private var allowedDomains:  Set<String> = []
     private var isWhitelistMode: Bool = false
     private var isLocked:        Bool = false
+    /// Epoch seconds at which the captive-portal bypass window ends. While we
+    /// are before this moment, every flow is allowed so the child can
+    /// authenticate to hotel / airport / cafe captive portals (whose login
+    /// pages live on thousands of unpredictable domains). Written by the main
+    /// app; snaps to 0 when the window closes.
+    private var captiveBypassUntil: TimeInterval = 0
 
     // Always pass through — iOS system services and the app's own backend.
     // Without these the device becomes unusable (no App Store, no updates, app can't sync).
@@ -57,6 +63,15 @@ class ContentFilterProvider: NEFilterDataProvider {
         // Never block essential system / app services
         if isEssential(host) {
             logDecision(host: host, allowed: true, reason: "essential")
+            return .allow()
+        }
+
+        // Captive-portal bypass window — pass everything so the child can
+        // log in to hotel / airport / cafe WiFi. Re-read the timestamp every
+        // flow (cheap) so the window closes at the exact moment the admin
+        // set, even if we never get restarted.
+        if captiveBypassActive {
+            logDecision(host: host, allowed: true, reason: "captive-bypass")
             return .allow()
         }
 
@@ -122,9 +137,18 @@ class ContentFilterProvider: NEFilterDataProvider {
 
     private func loadRules() {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
-        blockedDomains  = Set(defaults.stringArray(forKey: "bsafe.filter.blockedDomains") ?? [])
-        allowedDomains  = Set(defaults.stringArray(forKey: "bsafe.filter.allowedDomains") ?? [])
-        isWhitelistMode = defaults.bool(forKey: "bsafe.filter.whitelist")
-        isLocked        = defaults.bool(forKey: "bsafe.filter.locked")
+        blockedDomains     = Set(defaults.stringArray(forKey: "bsafe.filter.blockedDomains") ?? [])
+        allowedDomains     = Set(defaults.stringArray(forKey: "bsafe.filter.allowedDomains") ?? [])
+        isWhitelistMode    = defaults.bool(forKey: "bsafe.filter.whitelist")
+        isLocked           = defaults.bool(forKey: "bsafe.filter.locked")
+        captiveBypassUntil = defaults.double(forKey: "bsafe.filter.captiveBypassUntil")
+    }
+
+    /// Re-reads the timestamp every check; allows the window to expire even
+    /// without the extension being restarted by a preferences save.
+    private var captiveBypassActive: Bool {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return false }
+        captiveBypassUntil = defaults.double(forKey: "bsafe.filter.captiveBypassUntil")
+        return captiveBypassUntil > Date().timeIntervalSince1970
     }
 }

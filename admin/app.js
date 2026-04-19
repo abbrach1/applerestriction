@@ -67,6 +67,9 @@ function defaultConfig() {
     blockedDNSServices: [],
     blockedDNSCategories: [],
     browserEnabled: true,
+    captiveBypassAllowed: true,
+    captiveBypassMinutes: 5,
+    captiveBypassUntil: 0,
   };
 }
 
@@ -212,6 +215,12 @@ function applyConfigToUI(c) {
   document.getElementById("toggle-browser-enabled").checked  = c.browserEnabled !== false;
   document.getElementById("toggle-block-new-apps").checked   = !!c.blockNewApps;
 
+  // Captive portal bypass
+  document.getElementById("toggle-captive-allowed").checked  = c.captiveBypassAllowed !== false;
+  document.getElementById("captive-minutes").value           = c.captiveBypassMinutes || 5;
+  document.getElementById("captive-duration-field").classList.toggle("hidden", c.captiveBypassAllowed === false);
+  renderCaptiveCountdown(c.captiveBypassUntil || 0);
+
   // DNS
   document.getElementById("toggle-force-dns").checked         = !!c.forceDNS;
   document.getElementById("dns-profile-id").value             = c.nextDNSProfileID || "";
@@ -356,10 +365,42 @@ async function sendCommand(type, payload = {}) {
 document.getElementById("apply-websites").addEventListener("click", async () => {
   currentConfig.contentBlockerEnabled = document.getElementById("toggle-content-blocker").checked;
   currentConfig.browserEnabled        = document.getElementById("toggle-browser-enabled").checked;
+  currentConfig.captiveBypassAllowed  = document.getElementById("toggle-captive-allowed").checked;
+  currentConfig.captiveBypassMinutes  = Math.max(1, Math.min(15,
+    parseInt(document.getElementById("captive-minutes").value) || 5));
   await pushSettings();
   await sendCommand("updateWebsites");
   toast("Website settings applied");
 });
+
+document.getElementById("toggle-captive-allowed").addEventListener("change", (e) => {
+  document.getElementById("captive-duration-field").classList.toggle("hidden", !e.target.checked);
+});
+
+document.getElementById("captive-close-now").addEventListener("click", async () => {
+  currentConfig.captiveBypassUntil = 0;
+  await pushSettings();
+  await sendCommand("updateWebsites");
+  toast("Captive bypass closed");
+});
+
+// Re-render the countdown once a second so the admin sees it tick down.
+setInterval(() => {
+  if (currentConfig && currentConfig.captiveBypassUntil) {
+    renderCaptiveCountdown(currentConfig.captiveBypassUntil);
+  }
+}, 1000);
+
+function renderCaptiveCountdown(until) {
+  const active = document.getElementById("captive-active");
+  if (!until) { active.classList.add("hidden"); return; }
+  const remaining = Math.max(0, until - Date.now() / 1000);
+  if (remaining <= 0) { active.classList.add("hidden"); return; }
+  active.classList.remove("hidden");
+  const m = Math.floor(remaining / 60);
+  const s = Math.floor(remaining % 60);
+  document.getElementById("captive-countdown").textContent = `${m}m ${s}s remaining`;
+}
 
 document.getElementById("apply-dns").addEventListener("click", async () => {
   currentConfig.forceDNS                  = document.getElementById("toggle-force-dns").checked;

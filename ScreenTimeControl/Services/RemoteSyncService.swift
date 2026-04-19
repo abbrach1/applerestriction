@@ -25,6 +25,10 @@ class RemoteSyncService: ObservableObject {
     @Published var isOnline: Bool = true
     @Published var dnsProtectionMissing: Bool = false
     @Published var webFilterProtectionMissing: Bool = false
+    /// Epoch seconds when the current captive-portal bypass window ends.
+    /// 0 means no window is open. The child-side banner keys off this.
+    @Published var captiveBypassUntil: TimeInterval = 0
+    private var captiveBypassTimer: Timer?
     @Published var pendingWebsites: [String: String] = [:]
     @Published var pendingApps: [String: RecommendedApp] = [:]
     @Published var displayName: String = ""
@@ -166,6 +170,7 @@ class RemoteSyncService: ObservableObject {
             }
             await self.checkDNSTamper(config: config, uid: uid)
             await self.checkWebFilterTamper(config: config, uid: uid)
+            await MainActor.run { self.syncCaptiveBypassState(config) }
         }
 
         // Commands — childAdded fires once per new command, not for existing ones
@@ -729,6 +734,122 @@ class RemoteSyncService: ObservableObject {
     }
 
     func cancelWebFilterTamperAlerts() { cancelTamperAlerts(prefix: "bsafe.webfilter.tamper") }
+
+    // MARK: - Captive Portal Bypass
+
+    /// Opens the captive-portal bypass window for `minutes` minutes. Writes
+    /// the end-timestamp to Firebase so admin + every other device sees the
+    /// same state, writes it to the App Group so NEFilter reads it on the
+    /// very next flow, flips Safari Content Blocker to empty rules, and
+    /// schedules a timer to restore normal filtering when the window expires.
+    func openCaptiveBypass(minutes: Int) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        #if !targetEnvironment(simulator)
+        let snap = try? await dbRef.child("users/\(uid)/settings").getData()
+        guard let dict = snap?.value as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              var settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data),
+              settings.captiveBypassAllowed else {
+            return
+        }
+
+        let duration = max(1, min(minutes, settings.captiveBypassMinutes > 0 ? settings.captiveBypassMinutes : 5))
+        let until = Date().timeIntervalSince1970 + Double(duration * 60)
+        settings.captiveBypassUntil = until
+        captiveBypassUntil = until
+
+        // Push the new config to the child's persisted state so a background
+        // relaunch during the window still sees the bypass.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let out = try? encoder.encode(settings),
+           let json = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
+            _ = try? await dbRef.child("users/\(uid)/settings").setValue(json)
+        }
+
+        // Let NEFilter and Safari know immediately.
+        ContentFilterService.shared.openCaptiveBypass(until: until)
+        ContentBlockerService.shared.applyRules(for: settings)
+
+        // Alert the admin — tamper-alert pipeline already handles Firebase +
+        // email + FCM. Rate-limit key is distinct so the hourly-dedupe used
+        // for tamper types doesn't swallow it.
+        let message = "Captive-portal bypass opened for \(duration) minute\(duration == 1 ? "" : "s"). All website filtering is temporarily passing traffic so the child can log in to a captive WiFi network."
+        await sendAdminCaptiveNotice(uid: uid, message: message)
+
+        scheduleCaptiveBypassClose(at: until)
+    }
+
+    /// Closes the bypass window now — called by the auto-expire timer, the
+    /// admin's "Close Now" button, and on app launch if we find the
+    /// persisted window has already expired.
+    func closeCaptiveBypass() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        captiveBypassUntil = 0
+        captiveBypassTimer?.invalidate()
+        captiveBypassTimer = nil
+
+        #if !targetEnvironment(simulator)
+        ContentFilterService.shared.closeCaptiveBypass()
+
+        // Re-fetch the up-to-date settings and reapply them so the real
+        // filter list is back in force.
+        let snap = try? await dbRef.child("users/\(uid)/settings").getData()
+        guard let dict = snap?.value as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              var settings = try? JSONDecoder().decode(ScreenTimeConfiguration.self, from: data) else {
+            return
+        }
+        settings.captiveBypassUntil = 0
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let out = try? encoder.encode(settings),
+           let json = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
+            _ = try? await dbRef.child("users/\(uid)/settings").setValue(json)
+        }
+        ContentBlockerService.shared.applyRules(for: settings)
+        #endif
+    }
+
+    /// Called after we load settings from Firebase so the timer + the
+    /// published `captiveBypassUntil` match the server's view. Handles the
+    /// case where the admin opens a window, the child device is offline,
+    /// then comes back online with the window still active.
+    func syncCaptiveBypassState(_ config: ScreenTimeConfiguration) {
+        let now = Date().timeIntervalSince1970
+        if config.captiveBypassUntil > now {
+            captiveBypassUntil = config.captiveBypassUntil
+            scheduleCaptiveBypassClose(at: config.captiveBypassUntil)
+        } else if captiveBypassUntil != 0 {
+            // Either already expired or admin force-closed — clean up.
+            Task { await closeCaptiveBypass() }
+        }
+    }
+
+    private func scheduleCaptiveBypassClose(at until: TimeInterval) {
+        captiveBypassTimer?.invalidate()
+        let seconds = max(1, until - Date().timeIntervalSince1970)
+        captiveBypassTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.closeCaptiveBypass() }
+        }
+    }
+
+    private func sendAdminCaptiveNotice(uid: String, message: String) async {
+        let device = UIDevice.current.name
+        let subject = "B-SAFE: Captive WiFi Bypass Opened"
+        let body = "Device: \(device)\n\(message)"
+
+        let alert = TamperAlert(type: "captive_bypass_opened", message: message, timestamp: Date())
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let d = try? encoder.encode(alert),
+           let dict = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            _ = try? await dbRef.child("users/\(uid)/tamperAlerts").childByAutoId().setValue(dict)
+        }
+        await sendEmailAlert(subject: subject, body: body)
+        await sendFCMToAdmin(title: subject, body: body)
+    }
 
     // MARK: - Admin Tamper Alert Dispatch
 
