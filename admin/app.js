@@ -1,7 +1,22 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, onValue, set, push, remove, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+// B-SAFE Admin Console — web version
+//
+// Mirrors the iOS AdminDashboardView against the same Firebase Realtime
+// Database. Uses Firebase Auth (email/password) so the admin signs in with
+// the same credentials as in the iOS app, and reads/writes /users/{uid}/…
+// directly. Anything that requires iOS-only APIs (FamilyActivityPicker-based
+// selections, installing DNS profiles via MobileConfig, enabling the NEFilter
+// extension, etc.) still lives in the iOS admin app; this console focuses on
+// the things we can do purely from a browser with the same schema.
 
-// ─── Firebase Config ────────────────────────────────────────────────────────
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getDatabase, ref, onValue, set, push, remove, get, update, off,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// ─── Firebase config ─────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyDQ1Om4fjR9Znj885klnTawL3SmOqKLRsk",
   authDomain: "applerestrictions.firebaseapp.com",
@@ -12,468 +27,565 @@ const firebaseConfig = {
   databaseURL: "https://applerestrictions-default-rtdb.firebaseio.com",
 };
 
-const app = initializeApp(firebaseConfig);
-const db  = getDatabase(app);
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getDatabase(app);
 
-// ─── App State ───────────────────────────────────────────────────────────────
-let selectedDeviceId = null;
-let commandLog = [];
+// ─── State ───────────────────────────────────────────────────────────────────
+let selectedUID    = null;
+let currentConfig  = defaultConfig();
+let usersCache     = {};
+let activeRefs     = [];      // [{ ref, cb }] to unsubscribe when switching users
 
-// Predefined app categories (mirrors Apple's ActivityCategory)
-const APP_CATEGORIES = [
-  "Social Networking", "Entertainment", "Games", "Education",
-  "Productivity", "Health & Fitness", "Shopping", "News",
-  "Music", "Video", "Finance", "Travel",
-];
-
-// Common apps for quick blocking
-const COMMON_APPS = [
-  "Safari", "Instagram", "TikTok", "YouTube", "Snapchat",
-  "Twitter / X", "Facebook", "Reddit", "Discord", "Twitch",
-  "Netflix", "Spotify", "Messages", "FaceTime",
-];
-
-// Which ones are currently selected (blocked)
-const selectedCategories = new Set();
-const selectedApps       = new Set();
-
-// ─── Init ────────────────────────────────────────────────────────────────────
-buildTagGrids();
-listenToDevices();
-document.getElementById("refresh-btn").addEventListener("click", listenToDevices);
-
-// ─── Firebase Listeners ──────────────────────────────────────────────────────
-function listenToDevices() {
-  const devicesRef = ref(db, "devices");
-  onValue(devicesRef, (snapshot) => {
-    const data = snapshot.val() || {};
-    renderDeviceList(data);
-
-    // If a device is selected, refresh its panel
-    if (selectedDeviceId && data[selectedDeviceId]) {
-      loadDeviceSettings(selectedDeviceId, data[selectedDeviceId]);
-    }
-  });
+// ─── Default config matches iOS ScreenTimeConfiguration decoder defaults ────
+function defaultConfig() {
+  return {
+    id: crypto.randomUUID(),
+    deviceId: "",
+    deviceName: "",
+    lastUpdated: Date.now(),
+    blockedApps: [],
+    blockedCategories: [],
+    blockedAppsSelectionData: null,
+    blockedWebsites: [],
+    allowedWebsites: [],
+    websiteFilterMode: "blacklist",
+    appTimeLimits: [],
+    downtimeEnabled: false,
+    downtimeSchedule: { startHour: 22, startMinute: 0, endHour: 7, endMinute: 0, activeDays: [1,2,3,4,5,6,7] },
+    isLocked: false,
+    blockNewApps: false,
+    contentBlockerEnabled: true,
+    forceDNS: false,
+    nextDNSProfileID: "",
+    nextDNSApiKey: "",
+    dnsAlertOnRemoval: true,
+    dnsAutoReapply: true,
+    dnsRemovalPassword: "",
+    safeSearchEnabled: false,
+    youtubeRestrictedEnabled: false,
+    blockedDNSServices: [],
+    blockedDNSCategories: [],
+    browserEnabled: true,
+  };
 }
 
-// ─── Device List ─────────────────────────────────────────────────────────────
-function renderDeviceList(devicesData) {
-  const list = document.getElementById("device-list");
-  const ids  = Object.keys(devicesData);
-
-  if (ids.length === 0) {
-    list.innerHTML = `<div class="empty-state-small">No devices connected</div>`;
-    return;
+// ─── Auth flow ───────────────────────────────────────────────────────────────
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    document.getElementById("login-screen").classList.add("hidden");
+    document.getElementById("app-shell").classList.remove("hidden");
+    document.getElementById("admin-email").textContent = user.email;
+    startWatchingUsers();
+  } else {
+    document.getElementById("login-screen").classList.remove("hidden");
+    document.getElementById("app-shell").classList.add("hidden");
+    tearDownUserSubscriptions();
+    selectedUID = null;
   }
-
-  list.innerHTML = "";
-  ids.forEach((id) => {
-    const device = devicesData[id]?.info || {};
-    const isOnline = isDeviceOnline(device.lastSeen);
-
-    const item = document.createElement("div");
-    item.className = "device-item" + (id === selectedDeviceId ? " active" : "");
-    item.dataset.id = id;
-    item.innerHTML = `
-      <span class="device-item-icon">📱</span>
-      <div class="device-item-info">
-        <div class="device-item-name">${device.name || "Unknown Device"}</div>
-        <div class="device-item-sub">${device.model || ""}</div>
-      </div>
-      <div class="device-online-dot ${isOnline ? "dot-online" : "dot-offline"}"></div>
-    `;
-    item.addEventListener("click", () => selectDevice(id, devicesData[id]));
-    list.appendChild(item);
-  });
-}
-
-function isDeviceOnline(lastSeen) {
-  if (!lastSeen) return false;
-  const last = new Date(lastSeen);
-  return Date.now() - last.getTime() < 5 * 60 * 1000; // online within 5 min
-}
-
-// ─── Select Device ───────────────────────────────────────────────────────────
-function selectDevice(id, deviceData) {
-  selectedDeviceId = id;
-
-  // Update sidebar active state
-  document.querySelectorAll(".device-item").forEach((el) => {
-    el.classList.toggle("active", el.dataset.id === id);
-  });
-
-  document.getElementById("empty-panel").classList.add("hidden");
-  document.getElementById("device-panel").classList.remove("hidden");
-
-  loadDeviceSettings(id, deviceData);
-  listenToCommandLog(id);
-}
-
-// ─── Load Settings into Panel ────────────────────────────────────────────────
-function loadDeviceSettings(id, deviceData) {
-  const info     = deviceData?.info     || {};
-  const settings = deviceData?.settings || {};
-
-  // Header
-  document.getElementById("device-name").textContent  = info.name    || "Unknown Device";
-  document.getElementById("device-model").textContent = info.model   || "";
-  document.getElementById("device-os").textContent    = "iOS " + (info.osVersion || "—");
-
-  const isOnline = isDeviceOnline(info.lastSeen);
-  const statusEl = document.getElementById("device-status");
-  statusEl.textContent  = isOnline ? "Online" : "Offline";
-  statusEl.className    = "status-badge " + (isOnline ? "status-online" : "status-offline");
-
-  // Blocked categories / apps
-  selectedCategories.clear();
-  selectedApps.clear();
-
-  (settings.blockedCategories || []).forEach((c) => selectedCategories.add(c));
-  (settings.blockedApps || []).forEach((a) => selectedApps.add(a));
-
-  refreshTagHighlights();
-
-  // Downtime
-  const downtimeEnabled = settings.downtimeEnabled || false;
-  document.getElementById("downtime-toggle").checked = downtimeEnabled;
-  if (settings.downtimeSchedule) {
-    const s = settings.downtimeSchedule;
-    document.getElementById("downtime-start").value = formatTime(s.startHour, s.startMinute);
-    document.getElementById("downtime-end").value   = formatTime(s.endHour,   s.endMinute);
-
-    // Days
-    document.querySelectorAll(".day").forEach((btn) => {
-      const day = parseInt(btn.dataset.day);
-      const activeDays = s.activeDays || [1,2,3,4,5,6,7];
-      btn.classList.toggle("active", activeDays.includes(day));
-    });
-  }
-
-  // Time limit
-  if (settings.appTimeLimits?.length > 0) {
-    const limit = settings.appTimeLimits[0].timeLimitMinutes || 60;
-    document.getElementById("time-limit-slider").value = limit;
-    updateTimeLimitLabel(limit);
-    document.getElementById("timelimit-toggle").checked = true;
-  }
-}
-
-// ─── Add Device Modal ────────────────────────────────────────────────────────
-let pairWatchUnsubscribe = null;
-
-document.getElementById("add-device-btn").addEventListener("click", () => {
-  document.getElementById("modal-overlay").classList.remove("hidden");
-  document.getElementById("modal-step-1").classList.remove("hidden");
-  document.getElementById("modal-step-2").classList.add("hidden");
-  document.getElementById("new-device-label").value = "";
-  document.getElementById("paired-success").classList.add("hidden");
-  document.getElementById("waiting-indicator").classList.remove("hidden");
 });
 
-window.closeAddDeviceModal = function () {
-  document.getElementById("modal-overlay").classList.add("hidden");
-  if (pairWatchUnsubscribe) { pairWatchUnsubscribe(); pairWatchUnsubscribe = null; }
-};
-
-window.closeModal = function (event) {
-  if (event.target === document.getElementById("modal-overlay")) {
-    closeAddDeviceModal();
+document.getElementById("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = document.getElementById("login-email").value.trim();
+  const pass  = document.getElementById("login-password").value;
+  const err   = document.getElementById("login-error");
+  err.classList.add("hidden");
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch (e) {
+    err.textContent = e.message || String(e);
+    err.classList.remove("hidden");
   }
-};
+});
 
-window.generateAdminPairCode = async function () {
-  const label = document.getElementById("new-device-label").value.trim();
-  if (!label) {
-    document.getElementById("new-device-label").focus();
+document.getElementById("signout-btn").addEventListener("click", () => signOut(auth));
+
+// ─── User list ───────────────────────────────────────────────────────────────
+function startWatchingUsers() {
+  const usersRef = ref(db, "users");
+  const cb = onValue(usersRef, (snap) => {
+    usersCache = snap.val() || {};
+    renderUserList();
+    if (selectedUID && usersCache[selectedUID]) {
+      renderUserPanel();  // keep the open user fresh on change
+    }
+  });
+  activeRefs.push({ ref: usersRef, cb });
+}
+
+function renderUserList() {
+  const list = document.getElementById("user-list");
+  const ids  = Object.keys(usersCache);
+  if (ids.length === 0) {
+    list.innerHTML = `<div class="empty-state-small">No users yet</div>`;
     return;
   }
+  const rows = ids.map((uid) => {
+    const info = usersCache[uid]?.info || {};
+    const online = !!info.isOnline;
+    const name = info.displayName || info.deviceName || info.email || uid.slice(0, 8);
+    return { uid, name, sub: info.deviceName || info.email || "", online };
+  }).sort((a, b) => (a.online === b.online ? a.name.localeCompare(b.name) : (a.online ? -1 : 1)));
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  document.getElementById("pairing-code-text").textContent = code;
+  list.innerHTML = rows.map((r) => `
+    <div class="device-item ${r.uid === selectedUID ? "active" : ""}" data-uid="${r.uid}">
+      <span class="device-item-icon">📱</span>
+      <div class="device-item-info">
+        <div class="device-item-name">${escapeHtml(r.name)}</div>
+        <div class="device-item-sub">${escapeHtml(r.sub)}</div>
+      </div>
+      <div class="device-online-dot ${r.online ? "dot-online" : "dot-offline"}"></div>
+    </div>
+  `).join("");
 
-  // Store the pending pairing entry in Firebase so the iOS app can find it
-  await set(ref(db, `pairing/${code}`), {
-    adminLabel: label,
-    createdAt:  new Date().toISOString(),
-    pending:    true,
-  });
-
-  // Switch to step 2
-  document.getElementById("modal-step-1").classList.add("hidden");
-  document.getElementById("modal-step-2").classList.remove("hidden");
-
-  // Watch for the iOS app to register under this code
-  watchForPairing(code);
-
-  // Auto-expire code after 10 minutes
-  setTimeout(async () => {
-    const snap = await get(ref(db, `pairing/${code}`));
-    if (snap.exists() && snap.val().pending) {
-      await remove(ref(db, `pairing/${code}`));
-    }
-  }, 10 * 60 * 1000);
-};
-
-function watchForPairing(code) {
-  if (pairWatchUnsubscribe) pairWatchUnsubscribe();
-
-  const pairRef = ref(db, `pairing/${code}`);
-  pairWatchUnsubscribe = onValue(pairRef, async (snap) => {
-    const data = snap.val();
-    if (!data) return;
-
-    // iOS app fills in device info; once 'pending' is gone or device info appears
-    if (data.id || data.name) {
-      // Device registered — mark as paired
-      document.getElementById("waiting-indicator").classList.add("hidden");
-      document.getElementById("paired-success").classList.remove("hidden");
-      showToast("✅ Device connected!");
-
-      // Clean up pairing entry
-      await remove(pairRef);
-
-      if (pairWatchUnsubscribe) { pairWatchUnsubscribe(); pairWatchUnsubscribe = null; }
-    }
+  list.querySelectorAll(".device-item").forEach((el) => {
+    el.addEventListener("click", () => selectUser(el.dataset.uid));
   });
 }
 
-// ─── Tag Grids ───────────────────────────────────────────────────────────────
-function buildTagGrids() {
-  const catGrid = document.getElementById("category-grid");
-  APP_CATEGORIES.forEach((cat) => {
-    const tag = document.createElement("button");
-    tag.className    = "tag";
-    tag.textContent  = cat;
-    tag.dataset.name = cat;
-    tag.addEventListener("click", () => toggleTag(tag, selectedCategories, cat));
-    catGrid.appendChild(tag);
+document.getElementById("refresh-btn").addEventListener("click", () => {
+  if (selectedUID) renderUserPanel();
+});
+
+// ─── Select user ─────────────────────────────────────────────────────────────
+function selectUser(uid) {
+  if (selectedUID === uid) return;
+  selectedUID = uid;
+  document.getElementById("empty-panel").classList.add("hidden");
+  document.getElementById("user-panel").classList.remove("hidden");
+  renderUserList();
+  renderUserPanel();
+  subscribeUserStreams(uid);
+}
+
+function subscribeUserStreams(uid) {
+  tearDownUserSubscriptions();
+
+  const settingsRef = ref(db, `users/${uid}/settings`);
+  const sCb = onValue(settingsRef, (snap) => {
+    currentConfig = { ...defaultConfig(), ...(snap.val() || {}) };
+    applyConfigToUI(currentConfig);
+  });
+  activeRefs.push({ ref: settingsRef, cb: sCb });
+
+  const tamperRef = ref(db, `users/${uid}/tamperAlerts`);
+  const tCb = onValue(tamperRef, (snap) => renderTamperAlerts(snap.val() || {}));
+  activeRefs.push({ ref: tamperRef, cb: tCb });
+
+  const unlockRef = ref(db, `users/${uid}/unlockRequests`);
+  const uCb = onValue(unlockRef, (snap) => renderUnlockRequests(snap.val() || {}));
+  activeRefs.push({ ref: unlockRef, cb: uCb });
+
+  const webReqRef = ref(db, `users/${uid}/websiteRequests`);
+  const wCb = onValue(webReqRef, (snap) => renderWebsiteRequests(snap.val() || {}));
+  activeRefs.push({ ref: webReqRef, cb: wCb });
+}
+
+function tearDownUserSubscriptions() {
+  activeRefs.forEach(({ ref: r }) => off(r));
+  activeRefs = [];
+}
+
+// ─── Render user panel ───────────────────────────────────────────────────────
+function renderUserPanel() {
+  const info = usersCache[selectedUID]?.info || {};
+  document.getElementById("user-name").textContent     = info.displayName || info.email || "User";
+  document.getElementById("user-device").textContent   = info.deviceName || "—";
+  const online = !!info.isOnline;
+  const s = document.getElementById("user-status");
+  s.textContent = online ? "Online" : "Offline";
+  s.className   = "status-badge " + (online ? "status-online" : "status-offline");
+  document.getElementById("user-lastseen").textContent = info.lastSeen ? `last seen ${formatRelative(info.lastSeen)}` : "";
+}
+
+function applyConfigToUI(c) {
+  // Filter mode
+  setFilterMode(c.websiteFilterMode || "blacklist");
+  renderDomainList("blocked-list",  c.blockedWebsites || [], "blockedWebsites");
+  renderDomainList("allowed-list",  c.allowedWebsites || [], "allowedWebsites");
+  document.getElementById("blocked-count").textContent = (c.blockedWebsites || []).length;
+  document.getElementById("allowed-count").textContent = (c.allowedWebsites || []).length;
+
+  // Toggles
+  document.getElementById("toggle-content-blocker").checked  = !!c.contentBlockerEnabled;
+  document.getElementById("toggle-browser-enabled").checked  = c.browserEnabled !== false;
+  document.getElementById("toggle-block-new-apps").checked   = !!c.blockNewApps;
+
+  // DNS
+  document.getElementById("toggle-force-dns").checked         = !!c.forceDNS;
+  document.getElementById("dns-profile-id").value             = c.nextDNSProfileID || "";
+  document.getElementById("dns-removal-password").value       = c.dnsRemovalPassword || "";
+  document.getElementById("toggle-dns-alert").checked         = c.dnsAlertOnRemoval !== false;
+  document.getElementById("toggle-safesearch").checked        = !!c.safeSearchEnabled;
+  document.getElementById("toggle-youtube-restricted").checked = !!c.youtubeRestrictedEnabled;
+  document.getElementById("dns-config").classList.toggle("hidden", !c.forceDNS);
+
+  // Downtime
+  document.getElementById("downtime-toggle").checked = !!c.downtimeEnabled;
+  const s = c.downtimeSchedule || defaultConfig().downtimeSchedule;
+  document.getElementById("downtime-start").value = formatTime(s.startHour, s.startMinute);
+  document.getElementById("downtime-end").value   = formatTime(s.endHour,   s.endMinute);
+  document.querySelectorAll(".day").forEach((btn) => {
+    const day = parseInt(btn.dataset.day);
+    const active = (s.activeDays || [1,2,3,4,5,6,7]).includes(day);
+    btn.classList.toggle("active", active);
   });
 
-  const appGrid = document.getElementById("app-grid");
-  COMMON_APPS.forEach((appName) => {
-    const tag = document.createElement("button");
-    tag.className    = "tag";
-    tag.textContent  = appName;
-    tag.dataset.name = appName;
-    tag.addEventListener("click", () => toggleTag(tag, selectedApps, appName));
-    appGrid.appendChild(tag);
+  // Time limits
+  renderLimits(c.appTimeLimits || []);
+}
+
+// ─── Filter mode ─────────────────────────────────────────────────────────────
+function setFilterMode(mode) {
+  const bl = document.getElementById("mode-blacklist");
+  const wl = document.getElementById("mode-whitelist");
+  bl.classList.toggle("active", mode === "blacklist");
+  wl.classList.toggle("active", mode === "whitelist");
+  document.getElementById("blocked-sites-card").classList.toggle("hidden", mode !== "blacklist");
+  document.getElementById("allowed-sites-card").classList.toggle("hidden", mode !== "whitelist");
+  document.getElementById("filter-mode-hint").textContent = mode === "blacklist"
+    ? "Listed sites are blocked. Empty list = unrestricted."
+    : "Only listed sites are allowed. Everything else is blocked.";
+  currentConfig.websiteFilterMode = mode;
+}
+document.getElementById("mode-blacklist").addEventListener("click", () => setFilterMode("blacklist"));
+document.getElementById("mode-whitelist").addEventListener("click", () => setFilterMode("whitelist"));
+
+// ─── Domain lists ────────────────────────────────────────────────────────────
+function renderDomainList(elID, domains, fieldName) {
+  const ul = document.getElementById(elID);
+  ul.innerHTML = domains.map((d, i) => `
+    <li>
+      <span>${escapeHtml(d)}</span>
+      <button class="btn-chip" data-field="${fieldName}" data-index="${i}">Remove</button>
+    </li>
+  `).join("");
+  ul.querySelectorAll("button.btn-chip").forEach((b) => {
+    b.addEventListener("click", () => {
+      currentConfig[fieldName].splice(parseInt(b.dataset.index), 1);
+      applyConfigToUI(currentConfig);
+    });
   });
 }
 
-function toggleTag(el, set_, value) {
-  if (set_.has(value)) {
-    set_.delete(value);
-    el.classList.remove("selected");
-  } else {
-    set_.add(value);
-    el.classList.add("selected");
+function normalizeDomain(raw) {
+  return raw.trim().toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0];
+}
+
+document.getElementById("blocked-add").addEventListener("click", () => {
+  const d = normalizeDomain(document.getElementById("blocked-input").value);
+  if (!d) return;
+  if (!(currentConfig.blockedWebsites || []).includes(d)) {
+    currentConfig.blockedWebsites = [...(currentConfig.blockedWebsites || []), d];
   }
+  document.getElementById("blocked-input").value = "";
+  applyConfigToUI(currentConfig);
+});
+document.getElementById("allowed-add").addEventListener("click", () => {
+  const d = normalizeDomain(document.getElementById("allowed-input").value);
+  if (!d) return;
+  if (!(currentConfig.allowedWebsites || []).includes(d)) {
+    currentConfig.allowedWebsites = [...(currentConfig.allowedWebsites || []), d];
+  }
+  document.getElementById("allowed-input").value = "";
+  applyConfigToUI(currentConfig);
+});
+
+// ─── Time limits ─────────────────────────────────────────────────────────────
+function renderLimits(limits) {
+  const ul = document.getElementById("limits-list");
+  document.getElementById("limits-count").textContent = limits.length;
+  if (limits.length === 0) {
+    ul.innerHTML = `<li class="empty-state-small">No time limits. Create them from the iOS admin app.</li>`;
+    return;
+  }
+  ul.innerHTML = limits.map((l) => `
+    <li class="limit-row">
+      <div class="limit-info">
+        <strong>${escapeHtml(l.displayName || "Untitled")}</strong>
+        <small>${l.enabled === false ? "Paused" : "Active"}</small>
+      </div>
+      <input type="number" min="1" max="480" step="1" value="${l.timeLimitMinutes || 30}" data-id="${l.id}" class="limit-minutes" />
+      <span class="limit-unit">min</span>
+      <label class="limit-toggle"><input type="checkbox" ${l.enabled === false ? "" : "checked"} data-id="${l.id}" class="limit-enabled" /> on</label>
+      <button class="btn-chip danger" data-id="${l.id}">Delete</button>
+    </li>
+  `).join("");
+
+  ul.querySelectorAll(".limit-minutes").forEach((el) => {
+    el.addEventListener("change", () => {
+      const i = currentConfig.appTimeLimits.findIndex((l) => l.id === el.dataset.id);
+      if (i >= 0) currentConfig.appTimeLimits[i].timeLimitMinutes = Math.max(1, parseInt(el.value) || 1);
+    });
+  });
+  ul.querySelectorAll(".limit-enabled").forEach((el) => {
+    el.addEventListener("change", () => {
+      const i = currentConfig.appTimeLimits.findIndex((l) => l.id === el.dataset.id);
+      if (i >= 0) currentConfig.appTimeLimits[i].enabled = el.checked;
+    });
+  });
+  ul.querySelectorAll(".btn-chip.danger").forEach((el) => {
+    el.addEventListener("click", () => {
+      currentConfig.appTimeLimits = currentConfig.appTimeLimits.filter((l) => l.id !== el.dataset.id);
+      renderLimits(currentConfig.appTimeLimits);
+    });
+  });
 }
 
-function refreshTagHighlights() {
-  document.querySelectorAll("#category-grid .tag").forEach((tag) => {
-    tag.classList.toggle("selected", selectedCategories.has(tag.dataset.name));
-  });
-  document.querySelectorAll("#app-grid .tag").forEach((tag) => {
-    tag.classList.toggle("selected", selectedApps.has(tag.dataset.name));
-  });
+// ─── Apply handlers ──────────────────────────────────────────────────────────
+async function pushSettings() {
+  if (!selectedUID) return;
+  currentConfig.lastUpdated = Date.now();
+  await set(ref(db, `users/${selectedUID}/settings`), currentConfig);
 }
 
-// ─── Apply Actions ───────────────────────────────────────────────────────────
-window.applyRestrictions = async function () {
-  if (!selectedDeviceId) return;
+async function sendCommand(type, payload = {}) {
+  if (!selectedUID) return;
+  const cmd = {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    type, payload, executed: false,
+  };
+  await push(ref(db, `users/${selectedUID}/commands`), cmd);
+}
 
-  const settings = await getCurrentSettings();
-  settings.blockedCategories = Array.from(selectedCategories);
-  settings.blockedApps       = Array.from(selectedApps);
-  settings.lastUpdated       = new Date().toISOString();
+document.getElementById("apply-websites").addEventListener("click", async () => {
+  currentConfig.contentBlockerEnabled = document.getElementById("toggle-content-blocker").checked;
+  currentConfig.browserEnabled        = document.getElementById("toggle-browser-enabled").checked;
+  await pushSettings();
+  await sendCommand("updateWebsites");
+  toast("Website settings applied");
+});
 
-  await pushSettings(settings);
-  await sendCommand("updateBlockedApps");
-  showToast("App restrictions applied ✓");
-};
+document.getElementById("apply-dns").addEventListener("click", async () => {
+  currentConfig.forceDNS                  = document.getElementById("toggle-force-dns").checked;
+  currentConfig.nextDNSProfileID          = document.getElementById("dns-profile-id").value.trim();
+  currentConfig.dnsRemovalPassword        = document.getElementById("dns-removal-password").value;
+  currentConfig.dnsAlertOnRemoval         = document.getElementById("toggle-dns-alert").checked;
+  currentConfig.safeSearchEnabled         = document.getElementById("toggle-safesearch").checked;
+  currentConfig.youtubeRestrictedEnabled  = document.getElementById("toggle-youtube-restricted").checked;
+  await pushSettings();
+  await sendCommand("refreshSettings");
+  toast("DNS settings applied");
+});
 
-window.applyDowntime = async function () {
-  if (!selectedDeviceId) return;
-
+document.getElementById("apply-downtime").addEventListener("click", async () => {
   const startParts = document.getElementById("downtime-start").value.split(":");
   const endParts   = document.getElementById("downtime-end").value.split(":");
-
   const activeDays = [];
-  document.querySelectorAll(".day.active").forEach((btn) => {
-    activeDays.push(parseInt(btn.dataset.day));
-  });
-
-  const settings = await getCurrentSettings();
-  settings.downtimeEnabled  = document.getElementById("downtime-toggle").checked;
-  settings.downtimeSchedule = {
+  document.querySelectorAll(".day.active").forEach((btn) => activeDays.push(parseInt(btn.dataset.day)));
+  currentConfig.downtimeEnabled  = document.getElementById("downtime-toggle").checked;
+  currentConfig.downtimeSchedule = {
     startHour:   parseInt(startParts[0]),
     startMinute: parseInt(startParts[1]),
     endHour:     parseInt(endParts[0]),
     endMinute:   parseInt(endParts[1]),
     activeDays,
   };
-  settings.lastUpdated = new Date().toISOString();
-
-  await pushSettings(settings);
+  await pushSettings();
   await sendCommand("updateDowntime");
-  showToast("Downtime schedule applied ✓");
-};
+  toast("Downtime applied");
+});
 
-window.applyTimeLimit = async function () {
-  if (!selectedDeviceId) return;
+document.getElementById("apply-apps").addEventListener("click", async () => {
+  currentConfig.blockNewApps = document.getElementById("toggle-block-new-apps").checked;
+  await pushSettings();
+  await sendCommand("updateBlockedApps");
+  toast("App settings applied");
+});
 
-  const minutes  = parseInt(document.getElementById("time-limit-slider").value);
-  const enabled  = document.getElementById("timelimit-toggle").checked;
+document.getElementById("lock-btn").addEventListener("click", async () => {
+  currentConfig.isLocked = true;
+  await pushSettings();
+  await sendCommand("lockDevice");
+  toast("Locked");
+});
+document.getElementById("unlock-btn").addEventListener("click", async () => {
+  currentConfig.isLocked = false;
+  await pushSettings();
+  await sendCommand("unlockAll");
+  toast("Unlocked");
+});
+document.getElementById("refresh-settings-btn").addEventListener("click", async () => {
+  await sendCommand("refreshSettings");
+  toast("Refresh command sent");
+});
 
-  const settings = await getCurrentSettings();
-  settings.appTimeLimits = enabled
-    ? [{ id: "daily-limit", displayName: "Daily Limit", timeLimitMinutes: minutes }]
-    : [];
-  settings.lastUpdated = new Date().toISOString();
+document.getElementById("toggle-force-dns").addEventListener("change", (e) => {
+  document.getElementById("dns-config").classList.toggle("hidden", !e.target.checked);
+});
 
-  await pushSettings(settings);
-  await sendCommand("updateTimeLimits");
-  showToast(`Time limit set to ${minutes} min ✓`);
-};
-
-window.toggleDowntime = function (checkbox) {
-  document.getElementById("downtime-config").style.opacity = checkbox.checked ? "1" : "0.4";
-};
-
-window.sendCommand = async function (type) {
-  if (!selectedDeviceId) return;
-
-  const command = {
-    id:        crypto.randomUUID(),
-    type,
-    timestamp: new Date().toISOString(),
-    executed:  false,
-    payload:   {},
-  };
-
-  await push(ref(db, `devices/${selectedDeviceId}/commands`), command);
-
-  // Local log
-  commandLog.unshift(command);
-  renderCommandLog();
-
-  const labels = {
-    lockDevice:      "🔒 Lock All",
-    unlockAll:       "🔓 Unlock All",
-    refreshSettings: "↺ Refresh",
-    updateBlockedApps: "🛡 Update Blocked Apps",
-    updateDowntime:  "🌙 Update Downtime",
-    updateTimeLimits: "⏱ Update Time Limits",
-  };
-  showToast(`${labels[type] || type} sent ✓`);
-};
-
-// ─── Settings Helpers ────────────────────────────────────────────────────────
-async function getCurrentSettings() {
-  const snap = await get(ref(db, `devices/${selectedDeviceId}/settings`));
-  return snap.val() || {
-    id:               crypto.randomUUID(),
-    deviceId:         selectedDeviceId,
-    blockedApps:      [],
-    blockedCategories: [],
-    appTimeLimits:    [],
-    downtimeEnabled:  false,
-    downtimeSchedule: { startHour: 22, startMinute: 0, endHour: 7, endMinute: 0, activeDays: [1,2,3,4,5,6,7] },
-    shieldApps:       true,
-    shieldWebDomains: true,
-  };
-}
-
-async function pushSettings(settings) {
-  await set(ref(db, `devices/${selectedDeviceId}/settings`), settings);
-}
-
-// ─── Command Log ─────────────────────────────────────────────────────────────
-function listenToCommandLog(deviceId) {
-  onValue(ref(db, `devices/${deviceId}/commands`), (snap) => {
-    const data = snap.val() || {};
-    commandLog = Object.values(data)
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 20);
-    renderCommandLog();
-  });
-}
-
-function renderCommandLog() {
-  const el = document.getElementById("command-log");
-
-  if (commandLog.length === 0) {
-    el.innerHTML = `<div class="empty-state-small">No commands sent yet</div>`;
-    return;
-  }
-
-  const icons = {
-    lockDevice:        "🔒",
-    unlockAll:         "🔓",
-    refreshSettings:   "↺",
-    updateBlockedApps: "🛡",
-    updateDowntime:    "🌙",
-    updateTimeLimits:  "⏱",
-  };
-
-  const labels = {
-    lockDevice:        "Lock All Apps",
-    unlockAll:         "Unlock All Apps",
-    refreshSettings:   "Refresh Settings",
-    updateBlockedApps: "Update Blocked Apps",
-    updateDowntime:    "Update Downtime",
-    updateTimeLimits:  "Update Time Limits",
-  };
-
-  el.innerHTML = commandLog.map((cmd) => `
-    <div class="command-entry">
-      <span class="command-entry-icon">${icons[cmd.type] || "•"}</span>
-      <span class="command-entry-type">${labels[cmd.type] || cmd.type}</span>
-      <span class="command-entry-time">${relativeTime(cmd.timestamp)}</span>
-      <span style="font-size:11px;color:${cmd.executed ? "#22c55e" : "#888"}">${cmd.executed ? "done" : "pending"}</span>
-    </div>
-  `).join("");
-}
-
-window.clearCommands = async function () {
-  if (!selectedDeviceId) return;
-  await remove(ref(db, `devices/${selectedDeviceId}/commands`));
-  commandLog = [];
-  renderCommandLog();
-};
-
-// ─── Day Buttons ─────────────────────────────────────────────────────────────
+// Day buttons
 document.querySelectorAll(".day").forEach((btn) => {
   btn.addEventListener("click", () => btn.classList.toggle("active"));
 });
 
+// Tab switching
+document.querySelectorAll(".tab").forEach((t) => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+    const page = t.dataset.tab;
+    document.querySelectorAll(".tab-page").forEach((p) => {
+      p.classList.toggle("hidden", p.dataset.page !== page);
+    });
+  });
+});
+
+// ─── Tamper alerts ───────────────────────────────────────────────────────────
+function renderTamperAlerts(dict) {
+  const container = document.getElementById("tamper-banners");
+  const entries = Object.entries(dict)
+    .filter(([_, a]) => a && !a.dismissed)
+    .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+  if (entries.length === 0) { container.innerHTML = ""; return; }
+  container.innerHTML = entries.map(([key, a]) => `
+    <div class="tamper-banner">
+      <div>
+        <strong>⚠️ Tamper detected</strong>
+        <div>${escapeHtml(a.message || a.type || "")}</div>
+        <small>${formatRelative(a.timestamp)}</small>
+      </div>
+      <button class="btn-chip" data-key="${key}">Dismiss</button>
+    </div>
+  `).join("");
+  container.querySelectorAll("button.btn-chip").forEach((b) => {
+    b.addEventListener("click", async () => {
+      await remove(ref(db, `users/${selectedUID}/tamperAlerts/${b.dataset.key}`));
+    });
+  });
+}
+
+// ─── Requests ────────────────────────────────────────────────────────────────
+function renderUnlockRequests(dict) {
+  const ul = document.getElementById("unlock-requests");
+  const entries = Object.entries(dict);
+  if (entries.length === 0) {
+    ul.innerHTML = `<li class="empty-state-small">No pending unlock requests.</li>`;
+    return;
+  }
+  ul.innerHTML = entries.map(([key, r]) => `
+    <li class="request-row">
+      <div>
+        <strong>${escapeHtml(r.deviceName || "Device")}</strong>
+        <div>${escapeHtml(r.reason || "(no reason given)")}</div>
+        <small>${formatRelative(r.timestamp)}</small>
+      </div>
+      <div class="request-actions">
+        <button class="btn btn-success" data-action="approve-unlock"  data-key="${key}">Approve</button>
+        <button class="btn btn-danger"  data-action="deny-unlock"     data-key="${key}">Deny</button>
+      </div>
+    </li>
+  `).join("");
+  ul.querySelectorAll("button").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const key = b.dataset.key;
+      if (b.dataset.action === "approve-unlock") {
+        currentConfig.isLocked = false;
+        await pushSettings();
+        await sendCommand("unlockAll");
+        await pushNotification("✅ Unlock Approved", "Your device has been unlocked.");
+      } else {
+        await pushNotification("❌ Unlock Denied", "Your request was denied.");
+      }
+      await remove(ref(db, `users/${selectedUID}/unlockRequests/${key}`));
+    });
+  });
+}
+
+function renderWebsiteRequests(dict) {
+  const ul = document.getElementById("website-requests");
+  const entries = Object.entries(dict);
+  if (entries.length === 0) {
+    ul.innerHTML = `<li class="empty-state-small">No pending website requests.</li>`;
+    return;
+  }
+  ul.innerHTML = entries.map(([key, r]) => `
+    <li class="request-row">
+      <div>
+        <strong>${escapeHtml(r.domain || "")}</strong>
+        <div>${escapeHtml(r.reason || "(no reason given)")}</div>
+        <small>${escapeHtml(r.deviceName || "")} · ${formatRelative(r.timestamp)}</small>
+      </div>
+      <div class="request-actions">
+        <button class="btn btn-success" data-action="approve-site" data-key="${key}" data-domain="${escapeAttr(r.domain || "")}">Approve</button>
+        <button class="btn btn-danger"  data-action="deny-site"    data-key="${key}">Deny</button>
+      </div>
+    </li>
+  `).join("");
+  ul.querySelectorAll("button").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const key = b.dataset.key;
+      if (b.dataset.action === "approve-site") {
+        const domain = b.dataset.domain;
+        if (domain && !(currentConfig.allowedWebsites || []).includes(domain)) {
+          currentConfig.allowedWebsites = [...(currentConfig.allowedWebsites || []), domain];
+        }
+        currentConfig.websiteFilterMode = "whitelist";
+        await pushSettings();
+        await sendCommand("updateWebsites");
+        await pushNotification("✅ Website Approved", `${domain} has been added to your allowed list.`);
+      } else {
+        await pushNotification("❌ Website Denied", "Your website request was denied.");
+      }
+      await remove(ref(db, `users/${selectedUID}/websiteRequests/${key}`));
+    });
+  });
+}
+
+// ─── Push notification to child (writes to /notifications; iOS turns it into a local UN) ─
+async function pushNotification(title, body) {
+  if (!selectedUID) return;
+  const payload = {
+    id: crypto.randomUUID(),
+    title, body,
+    timestamp: Date.now(),
+  };
+  await push(ref(db, `users/${selectedUID}/notifications`), payload);
+}
+
+document.getElementById("notify-send").addEventListener("click", async () => {
+  const t = document.getElementById("notify-title").value.trim();
+  const b = document.getElementById("notify-body").value.trim();
+  if (!b) return;
+  await pushNotification(t, b);
+  document.getElementById("notify-title").value = "";
+  document.getElementById("notify-body").value = "";
+  toast("Notification sent");
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-window.updateTimeLimitLabel = function (val) {
-  const mins = parseInt(val);
-  const label = mins >= 60
-    ? `${Math.floor(mins / 60)}h ${mins % 60 > 0 ? (mins % 60) + "m" : ""}`.trim()
-    : `${mins} min`;
-  document.getElementById("time-limit-label").textContent = label;
-};
-
 function formatTime(hour, minute) {
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return `${String(hour || 0).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}`;
 }
 
-function relativeTime(isoString) {
-  const diff = Date.now() - new Date(isoString).getTime();
+function formatRelative(ts) {
+  if (!ts) return "";
+  const when = typeof ts === "number" ? ts : Date.parse(ts);
+  if (!when) return "";
+  const diff = Math.max(0, Date.now() - when);
   const sec  = Math.floor(diff / 1000);
-  if (sec < 60)  return `${sec}s ago`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  return `${Math.floor(sec / 3600)}h ago`;
+  if (sec < 60)    return `${sec}s ago`;
+  if (sec < 3600)  return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
 }
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/`/g, "&#96;"); }
 
 let toastTimer;
-function showToast(msg) {
-  const toast = document.getElementById("toast");
-  toast.textContent = msg;
-  toast.classList.remove("hidden");
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.add("hidden"), 2500);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 2500);
 }

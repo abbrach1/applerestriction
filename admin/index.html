@@ -3,97 +3,215 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Screen Time Control — Admin</title>
+  <title>B-SAFE Admin Console</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="layout">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <span class="logo-icon">⏱</span>
+
+<!-- Login screen -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="login-logo-icon">🛡</span>
+      <h1>B-SAFE Admin</h1>
+      <p class="login-sub">Sign in with the same admin account you use in the iOS app.</p>
+    </div>
+    <form id="login-form" class="login-form">
+      <input id="login-email"    type="email"    placeholder="Email"    autocomplete="email"            required />
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button id="login-button" type="submit" class="btn btn-primary">Sign in</button>
+      <div id="login-error" class="login-error hidden"></div>
+    </form>
+  </div>
+</div>
+
+<!-- Main layout (hidden until auth) -->
+<div id="app-shell" class="layout hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <span class="logo-icon">🛡</span>
+        <div>
+          <div class="logo-title">B-SAFE</div>
+          <div class="logo-sub">Admin Console</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-user">
+      <span id="admin-email" class="admin-email"></span>
+      <button id="signout-btn" class="btn-link">Sign out</button>
+    </div>
+
+    <div class="sidebar-section-label">Users</div>
+    <div id="user-list" class="device-list">
+      <div class="empty-state-small">Loading…</div>
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="btn-icon" id="refresh-btn">↺ Refresh</button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+
+    <!-- Empty state -->
+    <div id="empty-panel" class="empty-panel">
+      <div class="empty-icon">👥</div>
+      <h2>No user selected</h2>
+      <p>Pick a user from the sidebar to manage their settings.</p>
+      <p class="hint">Users appear after the iOS child device logs in.</p>
+    </div>
+
+    <!-- User panel -->
+    <div id="user-panel" class="device-panel hidden">
+
+      <div class="panel-header">
+        <div class="device-title">
+          <span class="device-icon">📱</span>
           <div>
-            <div class="logo-title">Screen Time</div>
-            <div class="logo-sub">Admin Console</div>
+            <h1 id="user-name">User</h1>
+            <div class="device-meta">
+              <span id="user-device"></span>
+              <span class="dot">·</span>
+              <span id="user-status" class="status-badge"></span>
+              <span class="dot">·</span>
+              <span id="user-lastseen" class="device-lastseen"></span>
+            </div>
           </div>
+        </div>
+        <div class="quick-actions">
+          <button class="btn btn-danger"    id="lock-btn">🔒 Lock All</button>
+          <button class="btn btn-success"   id="unlock-btn">🔓 Unlock All</button>
+          <button class="btn btn-secondary" id="refresh-settings-btn">↺ Refresh</button>
         </div>
       </div>
 
-      <div class="sidebar-section-label">Devices</div>
-      <div id="device-list" class="device-list">
-        <div class="empty-state-small">No devices connected</div>
+      <!-- Tamper alert banners -->
+      <div id="tamper-banners" class="tamper-banners"></div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active" data-tab="websites">🌐 Websites</button>
+        <button class="tab"        data-tab="dns">🌐 DNS</button>
+        <button class="tab"        data-tab="downtime">🌙 Downtime</button>
+        <button class="tab"        data-tab="apps">📱 Apps & Limits</button>
+        <button class="tab"        data-tab="requests">🔔 Requests</button>
+        <button class="tab"        data-tab="notify">✉ Send</button>
       </div>
 
-      <div class="sidebar-footer">
-        <button class="btn-icon" id="add-device-btn">＋ Add Device</button>
-        <button class="btn-icon" id="refresh-btn" style="margin-top:6px">↺ Refresh</button>
-      </div>
-    </aside>
+      <div class="panel-body">
 
-    <!-- Main content -->
-    <main class="main">
-      <!-- Empty state -->
-      <div id="empty-panel" class="empty-panel">
-        <div class="empty-icon">📱</div>
-        <h2>No device selected</h2>
-        <p>Select a device from the sidebar to configure its Screen Time settings.</p>
-        <p class="hint">Devices appear here after the iOS app is installed and a pairing code is generated.</p>
-      </div>
+        <!-- Websites -->
+        <section class="tab-page" data-page="websites">
+          <div class="card">
+            <div class="card-header">
+              <h2>Filter Mode</h2>
+            </div>
+            <div class="seg">
+              <button id="mode-blacklist" class="seg-btn active">Block Listed Sites</button>
+              <button id="mode-whitelist" class="seg-btn">Allow Only Listed Sites</button>
+            </div>
+            <p class="card-hint" id="filter-mode-hint">Listed sites are blocked. Empty list = unrestricted.</p>
+          </div>
 
-      <!-- Device panel -->
-      <div id="device-panel" class="device-panel hidden">
-
-        <!-- Device header -->
-        <div class="panel-header">
-          <div class="device-title">
-            <span class="device-icon">📱</span>
-            <div>
-              <h1 id="device-name">Device Name</h1>
-              <div class="device-meta">
-                <span id="device-model"></span>
-                <span class="dot">·</span>
-                <span id="device-os"></span>
-                <span class="dot">·</span>
-                <span id="device-status" class="status-badge"></span>
-              </div>
+          <div class="card" id="blocked-sites-card">
+            <div class="card-header">
+              <h2>Blocked Sites</h2>
+              <span id="blocked-count" class="card-count">0</span>
+            </div>
+            <ul id="blocked-list" class="domain-list"></ul>
+            <div class="add-row">
+              <input id="blocked-input" type="text" placeholder="e.g. youtube.com" autocomplete="off" />
+              <button id="blocked-add" class="btn btn-primary">Add</button>
             </div>
           </div>
-          <div class="quick-actions">
-            <button class="btn btn-danger" onclick="sendCommand('lockDevice')">🔒 Lock All</button>
-            <button class="btn btn-success" onclick="sendCommand('unlockAll')">🔓 Unlock All</button>
-            <button class="btn btn-secondary" onclick="sendCommand('refreshSettings')">↺ Refresh</button>
+
+          <div class="card hidden" id="allowed-sites-card">
+            <div class="card-header">
+              <h2>Allowed Sites</h2>
+              <span id="allowed-count" class="card-count">0</span>
+            </div>
+            <ul id="allowed-list" class="domain-list"></ul>
+            <div class="add-row">
+              <input id="allowed-input" type="text" placeholder="e.g. wikipedia.org" autocomplete="off" />
+              <button id="allowed-add" class="btn btn-primary">Add</button>
+            </div>
           </div>
-        </div>
 
-        <div class="panel-body">
+          <div class="card">
+            <div class="card-header"><h2>Enforcement</h2></div>
+            <label class="row-toggle">
+              <span>
+                <strong>Safari Content Blocker</strong>
+                <small>Enforces the list inside Safari. Kid must enable it in Settings → Safari → Extensions.</small>
+              </span>
+              <input type="checkbox" id="toggle-content-blocker" />
+            </label>
+            <label class="row-toggle">
+              <span>
+                <strong>Show B-SAFE Browser</strong>
+                <small>Displays the built-in safe browser tab on the child's device.</small>
+              </span>
+              <input type="checkbox" id="toggle-browser-enabled" />
+            </label>
+          </div>
 
-          <!-- Block Apps -->
-          <section class="card">
+          <button class="btn btn-primary full" id="apply-websites">Apply Website Settings</button>
+        </section>
+
+        <!-- DNS -->
+        <section class="tab-page hidden" data-page="dns">
+          <div class="card">
+            <div class="card-header"><h2>NextDNS</h2></div>
+            <label class="row-toggle">
+              <span>
+                <strong>Force NextDNS</strong>
+                <small>System-wide DNS filtering. Optional — the website list is enforced without this.</small>
+              </span>
+              <input type="checkbox" id="toggle-force-dns" />
+            </label>
+            <div id="dns-config" class="dns-config hidden">
+              <label class="field">
+                <span>Profile ID</span>
+                <input id="dns-profile-id" type="text" placeholder="abc123" />
+              </label>
+              <label class="field">
+                <span>Removal Password (optional)</span>
+                <input id="dns-removal-password" type="password" placeholder="Leave blank for none" autocomplete="new-password" />
+              </label>
+              <label class="row-toggle compact">
+                <span><strong>Alert me if child removes the profile</strong></span>
+                <input type="checkbox" id="toggle-dns-alert" />
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><h2>Safety</h2></div>
+            <label class="row-toggle compact">
+              <span><strong>Force SafeSearch</strong></span>
+              <input type="checkbox" id="toggle-safesearch" />
+            </label>
+            <label class="row-toggle compact">
+              <span><strong>YouTube Restricted Mode</strong></span>
+              <input type="checkbox" id="toggle-youtube-restricted" />
+            </label>
+          </div>
+
+          <button class="btn btn-primary full" id="apply-dns">Apply DNS Settings</button>
+        </section>
+
+        <!-- Downtime -->
+        <section class="tab-page hidden" data-page="downtime">
+          <div class="card">
             <div class="card-header">
-              <h2>🛡 Blocked Apps &amp; Categories</h2>
-              <span class="card-hint">Tap an app or category to toggle blocking</span>
-            </div>
-
-            <div class="section-label">App Categories</div>
-            <div class="tag-grid" id="category-grid">
-              <!-- filled by JS -->
-            </div>
-
-            <div class="section-label mt">Specific Apps</div>
-            <div class="tag-grid" id="app-grid">
-              <!-- filled by JS -->
-            </div>
-
-            <button class="btn btn-primary mt" onclick="applyRestrictions()">Apply Restrictions</button>
-          </section>
-
-          <!-- Downtime -->
-          <section class="card">
-            <div class="card-header">
-              <h2>🌙 Downtime Schedule</h2>
+              <h2>Downtime Schedule</h2>
               <label class="toggle">
-                <input type="checkbox" id="downtime-toggle" onchange="toggleDowntime(this)" />
+                <input type="checkbox" id="downtime-toggle" />
                 <span class="toggle-track"></span>
               </label>
             </div>
@@ -121,88 +239,79 @@
                 <button class="day active" data-day="6">Fri</button>
                 <button class="day active" data-day="7">Sat</button>
               </div>
-
-              <button class="btn btn-primary mt" onclick="applyDowntime()">Apply Schedule</button>
             </div>
-          </section>
+          </div>
 
-          <!-- Time Limits -->
-          <section class="card">
+          <button class="btn btn-primary full" id="apply-downtime">Apply Downtime</button>
+        </section>
+
+        <!-- Apps + Time Limits -->
+        <section class="tab-page hidden" data-page="apps">
+          <div class="card">
+            <div class="card-header"><h2>App Installations</h2></div>
+            <label class="row-toggle">
+              <span>
+                <strong>Block new app installs</strong>
+                <small>Child must request new apps through you.</small>
+              </span>
+              <input type="checkbox" id="toggle-block-new-apps" />
+            </label>
+          </div>
+
+          <div class="card">
             <div class="card-header">
-              <h2>⏱ Daily Time Limit</h2>
-              <label class="toggle">
-                <input type="checkbox" id="timelimit-toggle" />
-                <span class="toggle-track"></span>
-              </label>
+              <h2>Daily Time Limits</h2>
+              <span id="limits-count" class="card-count">0</span>
             </div>
+            <p class="card-hint">
+              Time limits are created on the iOS admin app (it needs Apple's FamilyActivityPicker to pick apps).
+              From here you can adjust the daily minute budget, pause, or delete them.
+            </p>
+            <ul id="limits-list" class="domain-list"></ul>
+          </div>
 
-            <div class="slider-row">
-              <input type="range" id="time-limit-slider" min="5" max="480" step="5" value="60"
-                     oninput="updateTimeLimitLabel(this.value)" />
-              <span id="time-limit-label" class="slider-label">60 min</span>
-            </div>
-            <div class="slider-hints">
-              <span>5 min</span><span>4 hours</span><span>8 hours</span>
-            </div>
+          <button class="btn btn-primary full" id="apply-apps">Apply App Settings</button>
+        </section>
 
-            <button class="btn btn-primary mt" onclick="applyTimeLimit()">Apply Limit</button>
-          </section>
+        <!-- Requests -->
+        <section class="tab-page hidden" data-page="requests">
+          <div class="card">
+            <div class="card-header"><h2>Unlock Requests</h2></div>
+            <ul id="unlock-requests" class="request-list">
+              <li class="empty-state-small">No pending unlock requests.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-header"><h2>Website Requests</h2></div>
+            <ul id="website-requests" class="request-list">
+              <li class="empty-state-small">No pending website requests.</li>
+            </ul>
+          </div>
+        </section>
 
-          <!-- Command Log -->
-          <section class="card">
-            <div class="card-header">
-              <h2>📋 Recent Commands</h2>
-              <button class="btn-link" onclick="clearCommands()">Clear</button>
-            </div>
-            <div id="command-log" class="command-log">
-              <div class="empty-state-small">No commands sent yet</div>
-            </div>
-          </section>
+        <!-- Send notification -->
+        <section class="tab-page hidden" data-page="notify">
+          <div class="card">
+            <div class="card-header"><h2>Send Notification to Child</h2></div>
+            <label class="field">
+              <span>Title</span>
+              <input id="notify-title" type="text" placeholder="e.g. Dinner in 10" />
+            </label>
+            <label class="field">
+              <span>Body</span>
+              <textarea id="notify-body" rows="3" placeholder="Message to display on the child's device"></textarea>
+            </label>
+            <button id="notify-send" class="btn btn-primary">Send Notification</button>
+          </div>
+        </section>
 
-        </div>
-      </div>
-    </main>
-  </div>
-
-  <!-- Add Device Modal -->
-  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>Add Device</h2>
-        <button class="modal-close" onclick="closeAddDeviceModal()">✕</button>
-      </div>
-
-      <!-- Step 1: enter name -->
-      <div id="modal-step-1">
-        <p class="modal-desc">Give this device a name (e.g. "Jake's iPhone"), then generate a pairing code to show on the device being added.</p>
-        <div class="form-group">
-          <label>Device Label</label>
-          <input type="text" id="new-device-label" placeholder="e.g. Jake's iPhone" />
-        </div>
-        <button class="btn btn-primary" onclick="generateAdminPairCode()">Generate Pairing Code</button>
-      </div>
-
-      <!-- Step 2: show code -->
-      <div id="modal-step-2" class="hidden">
-        <p class="modal-desc">Open the <strong>Screen Time Control</strong> app on the device, go to <strong>Remote → Child</strong>, and enter this code:</p>
-        <div class="pairing-code-display">
-          <span id="pairing-code-text">000000</span>
-        </div>
-        <p class="modal-hint">Code expires in 10 minutes. Waiting for device to connect…</p>
-        <div id="waiting-indicator" class="waiting">
-          <span class="spinner"></span> Waiting for pairing…
-        </div>
-        <div id="paired-success" class="hidden paired-success">
-          ✅ Device connected successfully!
-        </div>
-        <button class="btn btn-secondary mt" onclick="closeAddDeviceModal()">Done</button>
       </div>
     </div>
-  </div>
+  </main>
+</div>
 
-  <!-- Toast -->
-  <div id="toast" class="toast hidden"></div>
+<div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
