@@ -40,5 +40,7 @@ Sign in with the same admin Firebase Auth credentials you use in the iOS app. Ma
   - **Websites** — block/allow domains, content blocker toggle, browser toggle
   - **DNS** — Logs / Allow / Block / Safety (NextDNS via API proxy at `/api/nextdns`)
   - **Downtime** — schedule
+  - **Apps** — App Store search + recommendations, app review, block-new-apps toggle, emergency bypass codes, send admin notifications
   - **Requests** — unlock requests, website requests, tamper alerts (live)
   - **Commands** — lock/unlock all, refresh, block new apps
+- **Settings page** (`/dashboard/settings`) — global NextDNS API key, alert email, SendGrid key

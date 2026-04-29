@@ -23,7 +23,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <Link href="/dashboard" className="font-bold text-lg">B-SAFE Admin</Link>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">{user.email}</span>
+            <Link
+              href="/dashboard/settings"
+              className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100"
+            >
+              Settings
+            </Link>
+            <span className="text-sm text-gray-500 hidden sm:inline">{user.email}</span>
             <button
               onClick={() => signOutUser().then(() => router.replace("/login"))}
               className="rounded-md border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100"

@@ -10,8 +10,9 @@ import DnsTab from "@/components/tabs/DnsTab";
 import DowntimeTab from "@/components/tabs/DowntimeTab";
 import RequestsTab from "@/components/tabs/RequestsTab";
 import CommandsTab from "@/components/tabs/CommandsTab";
+import AppsTab from "@/components/tabs/AppsTab";
 
-const TABS = ["Websites", "DNS", "Downtime", "Requests", "Commands"];
+const TABS = ["Websites", "DNS", "Downtime", "Apps", "Requests", "Commands"];
 
 export default function UserPage() {
   const params = useParams<{ uid: string }>();
@@ -64,8 +65,9 @@ export default function UserPage() {
         {tab === 0 && <WebsiteTab config={config} update={update} save={save} globalApiKey={globalApiKey} />}
         {tab === 1 && <DnsTab uid={uid} config={config} update={update} save={save} globalApiKey={globalApiKey} />}
         {tab === 2 && <DowntimeTab config={config} update={update} save={save} />}
-        {tab === 3 && <RequestsTab uid={uid} config={config} save={save} update={update} />}
-        {tab === 4 && <CommandsTab uid={uid} config={config} save={save} update={update} />}
+        {tab === 3 && <AppsTab uid={uid} config={config} update={update} save={save} />}
+        {tab === 4 && <RequestsTab uid={uid} config={config} save={save} update={update} />}
+        {tab === 5 && <CommandsTab uid={uid} config={config} save={save} update={update} />}
       </div>
 
       {(saving || savedFlash) && (

@@ -103,6 +103,62 @@ export async function pushRecommendedApp(uid: string, app: Omit<RecommendedApp, 
   await set(r, { ...app, id: r.key, timestamp: Date.now() });
 }
 
+export function subscribePendingApps(
+  uid: string,
+  cb: (items: { pushKey: string; app: RecommendedApp }[]) => void,
+) {
+  const r = ref(db, `users/${uid}/pendingApps`);
+  const handler = (snap: DataSnapshot) => {
+    const items: { pushKey: string; app: RecommendedApp }[] = [];
+    snap.forEach((c) => {
+      items.push({ pushKey: c.key!, app: c.val() as RecommendedApp });
+      return false;
+    });
+    cb(items);
+  };
+  onValue(r, handler);
+  return () => off(r, "value", handler);
+}
+
+export async function removePendingApp(uid: string, pushKey: string) {
+  await remove(ref(db, `users/${uid}/pendingApps/${pushKey}`));
+}
+
+export async function loadAppListReport(uid: string): Promise<{
+  appCount: number;
+  categoryCount: number;
+  timestamp: number;
+  reviewed: boolean;
+} | null> {
+  const snap = await get(ref(db, `users/${uid}/appList`));
+  if (!snap.exists()) return null;
+  const v = snap.val();
+  return {
+    appCount: v.appCount || 0,
+    categoryCount: v.categoryCount || 0,
+    timestamp: v.timestamp || 0,
+    reviewed: !!v.reviewed,
+  };
+}
+
+export async function markAppListReviewed(uid: string) {
+  await update(ref(db, `users/${uid}/appList`), { reviewed: true });
+}
+
+export async function setEmergencyBypassCode(uid: string, code: string, durationMinutes: number) {
+  await set(ref(db, `users/${uid}/emergencyBypass`), {
+    code,
+    durationMinutes,
+    createdAt: Date.now(),
+    used: false,
+  });
+}
+
+export async function pushAdminNotification(uid: string, title: string, body: string) {
+  const r = push(ref(db, `users/${uid}/notifications`));
+  await set(r, { id: r.key, title, body, timestamp: Date.now() });
+}
+
 export async function loadAdminConfigValue(key: string): Promise<string> {
   const snap = await get(ref(db, `adminConfig/${key}`));
   return (snap.val() as string) || "";
