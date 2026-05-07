@@ -1254,11 +1254,7 @@ struct PendingWebsiteRow: View {
         var config = (try? decoder.decode(ScreenTimeConfiguration.self, from: data)) ?? ScreenTimeConfiguration()
 
         // Add domain if not already present
-        let clean = domain.lowercased()
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .replacingOccurrences(of: "www.", with: "")
-        if !config.allowedWebsites.contains(clean) {
+        if let clean = DomainMatcher.normalize(domain), !config.allowedWebsites.contains(clean) {
             config.allowedWebsites.append(clean)
         }
         // Switch to whitelist mode so the content blocker actually enforces it

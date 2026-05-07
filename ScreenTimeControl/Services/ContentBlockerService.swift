@@ -130,28 +130,30 @@ class ContentBlockerService {
 
         switch config.websiteFilterMode {
         case .blacklist:
-            let domains = config.blockedWebsites.filter { !$0.isEmpty }
+            let domains = config.blockedWebsites.compactMap(DomainMatcher.normalize)
             guard !domains.isEmpty else { return [] }
-            // One block rule per domain (catches all subdomains with "*" prefix)
+            // Safari content-blocker if-domain syntax: a leading "*" matches the
+            // domain and all of its subdomains. We normalize entries to bare hosts
+            // (no protocol, no www., no path) so "*foo.com" matches "foo.com" and
+            // "www.foo.com" and "m.foo.com" etc.
             return domains.map { domain in
                 Rule(
                     action: Rule.Action(type: "block"),
                     trigger: Rule.Trigger(
                         urlFilter: ".*",
-                        ifDomain: ["*\(domain.hasPrefix("*.") ? String(domain.dropFirst(2)) : domain)"],
+                        ifDomain: ["*\(domain)"],
                         unlessDomain: nil
                     )
                 )
             }
 
         case .whitelist:
-            let allowed = config.allowedWebsites.filter { !$0.isEmpty }
+            let allowed = config.allowedWebsites.compactMap(DomainMatcher.normalize)
             guard !allowed.isEmpty else {
                 // No allowed list yet — block everything
                 return [blockAll()]
             }
-            // Block all, then un-block the allowed set
-            let prefixed = allowed.map { "*\($0.hasPrefix("*.") ? String($0.dropFirst(2)) : $0)" }
+            let prefixed = allowed.map { "*\($0)" }
             return [
                 blockAll(),
                 Rule(

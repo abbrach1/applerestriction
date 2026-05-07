@@ -79,8 +79,12 @@ class ContentFilterService {
 
     private func writeRules(_ config: ScreenTimeConfiguration) {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
-        defaults.set(config.blockedWebsites,                    forKey: "bsafe.filter.blockedDomains")
-        defaults.set(config.allowedWebsites,                    forKey: "bsafe.filter.allowedDomains")
+        // Normalize entries before persisting so the extension matches reliably
+        // regardless of how the admin typed them ("https://www.foo.com/" → "foo.com").
+        defaults.set(config.blockedWebsites.compactMap(DomainMatcher.normalize),
+                     forKey: "bsafe.filter.blockedDomains")
+        defaults.set(config.allowedWebsites.compactMap(DomainMatcher.normalize),
+                     forKey: "bsafe.filter.allowedDomains")
         defaults.set(config.websiteFilterMode == .whitelist,    forKey: "bsafe.filter.whitelist")
         defaults.set(config.isLocked,                           forKey: "bsafe.filter.locked")
     }

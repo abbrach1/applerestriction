@@ -107,11 +107,25 @@ class ContentFilterProvider: NEFilterDataProvider {
     }
 
     /// Returns true if `host` matches `rule` exactly or as a subdomain.
-    /// Rule "youtube.com" matches "youtube.com" and "www.youtube.com".
+    /// Tolerant of protocol prefixes, paths, ports, and `www.` so admin entries
+    /// like "https://www.youtube.com/" still match "m.youtube.com".
     private func matches(host: String, rule: String) -> Bool {
-        let r = rule.lowercased().trimmingCharacters(in: .whitespaces)
-        let h = host.lowercased()
+        guard let r = normalizeDomain(rule), let h = normalizeDomain(host) else { return false }
         return h == r || h.hasSuffix(".\(r)")
+    }
+
+    /// Strip protocol, path, query, port, leading `www.`, and trailing dot.
+    private func normalizeDomain(_ raw: String) -> String? {
+        var s = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if let r = s.range(of: "://") { s = String(s[r.upperBound...]) }
+        if let r = s.firstIndex(of: "/") { s = String(s[..<r]) }
+        if let r = s.firstIndex(of: "?") { s = String(s[..<r]) }
+        if let r = s.firstIndex(of: "#") { s = String(s[..<r]) }
+        if let r = s.firstIndex(of: ":") { s = String(s[..<r]) }
+        while s.hasSuffix(".") { s.removeLast() }
+        if s.hasPrefix("www.") { s = String(s.dropFirst(4)) }
+        return s.isEmpty ? nil : s
     }
 
     private func isEssential(_ host: String) -> Bool {

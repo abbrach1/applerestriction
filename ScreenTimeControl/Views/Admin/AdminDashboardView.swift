@@ -1460,12 +1460,8 @@ struct WebsiteTab: View {
                             .keyboardType(.URL)
                             .focused($inputFocused)
                         Button("Add") {
-                            let domain = newDomain.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .lowercased()
-                                .replacingOccurrences(of: "https://", with: "")
-                                .replacingOccurrences(of: "http://", with: "")
-                                .replacingOccurrences(of: "www.", with: "")
-                            if !domain.isEmpty && !vm.config.blockedWebsites.contains(domain) {
+                            guard let domain = DomainMatcher.normalize(newDomain) else { return }
+                            if !vm.config.blockedWebsites.contains(domain) {
                                 vm.config.blockedWebsites.append(domain)
                                 newDomain = ""
                             }
@@ -1492,12 +1488,8 @@ struct WebsiteTab: View {
                             .keyboardType(.URL)
                             .focused($inputFocused)
                         Button("Add") {
-                            let domain = newDomain.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .lowercased()
-                                .replacingOccurrences(of: "https://", with: "")
-                                .replacingOccurrences(of: "http://", with: "")
-                                .replacingOccurrences(of: "www.", with: "")
-                            if !domain.isEmpty && !vm.config.allowedWebsites.contains(domain) {
+                            guard let domain = DomainMatcher.normalize(newDomain) else { return }
+                            if !vm.config.allowedWebsites.contains(domain) {
                                 vm.config.allowedWebsites.append(domain)
                                 newDomain = ""
                             }
@@ -1626,12 +1618,7 @@ struct WebsiteTab: View {
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     private func cleanDomain(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .replacingOccurrences(of: "www.", with: "")
-            .components(separatedBy: "/").first ?? raw
+        DomainMatcher.normalize(raw) ?? ""
     }
 
     private func sendWebsiteToDevice() async {
