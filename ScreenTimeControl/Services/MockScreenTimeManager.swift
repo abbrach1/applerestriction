@@ -9,15 +9,20 @@ import Combine
 class MockAuthorizationManager: ObservableObject {
     static let shared = MockAuthorizationManager()
 
-    @Published var isAuthorized: Bool = false
+    @Published var isAuthorized: Bool = UserDefaults.standard.bool(forKey: "bsafe.familyControlsAuthorized")
     @Published var authorizationError: String?
     @Published var isRequesting: Bool = false
+
+    func checkAuthorization() {
+        isAuthorized = UserDefaults.standard.bool(forKey: "bsafe.familyControlsAuthorized")
+    }
 
     func requestAuthorization() async {
         isRequesting = true
         // Simulate a short delay
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         isAuthorized = true
+        UserDefaults.standard.set(true, forKey: "bsafe.familyControlsAuthorized")
         isRequesting = false
     }
 
@@ -25,11 +30,13 @@ class MockAuthorizationManager: ObservableObject {
         isRequesting = true
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         isAuthorized = true
+        UserDefaults.standard.set(true, forKey: "bsafe.familyControlsAuthorized")
         isRequesting = false
     }
 
     func revokeAuthorization() {
         isAuthorized = false
+        UserDefaults.standard.set(false, forKey: "bsafe.familyControlsAuthorized")
     }
 }
 

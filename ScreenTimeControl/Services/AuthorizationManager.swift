@@ -9,24 +9,43 @@ import Combine
 class AuthorizationManager: ObservableObject {
     static let shared = AuthorizationManager()
 
-    @Published var isAuthorized: Bool = false
+    @Published var isAuthorized: Bool
     @Published var authorizationError: String?
     @Published var isRequesting: Bool = false
 
     private let center = AuthorizationCenter.shared
+    private var cancellables = Set<AnyCancellable>()
+
+    private static let authorizedCacheKey = "bsafe.familyControlsAuthorized"
 
     private init() {
-        // Check existing authorization status
-        checkAuthorization()
+        // Optimistically restore the last-known authorization state so that we
+        // don't flash the "Set Up This Device" prompt on cold launch while
+        // FamilyControls is still settling. The system publisher below will
+        // correct this if the user revoked authorization in Settings.
+        let cached = UserDefaults.standard.bool(forKey: Self.authorizedCacheKey)
+        self.isAuthorized = cached
+
+        applyStatus(center.authorizationStatus)
+
+        center.$authorizationStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.applyStatus(status)
+            }
+            .store(in: &cancellables)
     }
 
     func checkAuthorization() {
-        switch center.authorizationStatus {
-        case .approved:
-            isAuthorized = true
-        default:
-            isAuthorized = false
+        applyStatus(center.authorizationStatus)
+    }
+
+    private func applyStatus(_ status: AuthorizationStatus) {
+        let approved = (status == .approved)
+        if approved != isAuthorized {
+            isAuthorized = approved
         }
+        UserDefaults.standard.set(approved, forKey: Self.authorizedCacheKey)
     }
 
     /// Request authorization as an individual (child's device) or parent
@@ -37,10 +56,10 @@ class AuthorizationManager: ObservableObject {
         do {
             // For individual/child device management
             try await center.requestAuthorization(for: .individual)
-            isAuthorized = true
+            applyStatus(center.authorizationStatus)
         } catch {
             authorizationError = "Authorization failed: \(error.localizedDescription)"
-            isAuthorized = false
+            applyStatus(center.authorizationStatus)
         }
 
         isRequesting = false
@@ -53,10 +72,10 @@ class AuthorizationManager: ObservableObject {
 
         do {
             try await center.requestAuthorization(for: .child)
-            isAuthorized = true
+            applyStatus(center.authorizationStatus)
         } catch {
             authorizationError = "Parent authorization failed: \(error.localizedDescription)"
-            isAuthorized = false
+            applyStatus(center.authorizationStatus)
         }
 
         isRequesting = false
@@ -67,7 +86,7 @@ class AuthorizationManager: ObservableObject {
             Task { @MainActor in
                 switch result {
                 case .success:
-                    self.isAuthorized = false
+                    self.applyStatus(self.center.authorizationStatus)
                 case .failure(let error):
                     self.authorizationError = "Revoke failed: \(error.localizedDescription)"
                 }

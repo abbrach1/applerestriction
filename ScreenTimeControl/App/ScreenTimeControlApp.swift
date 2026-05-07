@@ -41,6 +41,7 @@ struct ScreenTimeControlApp: App {
     @StateObject private var authManager = ActiveAuthorizationManager.shared
     @StateObject private var settingsManager = ActiveScreenTimeSettingsManager.shared
     @StateObject private var syncService = RemoteSyncService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         FirebaseApp.configure()
@@ -86,6 +87,11 @@ struct ScreenTimeControlApp: App {
                         syncService.startListening()
                         scheduleChildSync()
                     }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                authManager.checkAuthorization()
             }
         }
     }
