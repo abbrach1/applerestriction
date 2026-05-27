@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { ScreenTimeConfiguration } from "@/lib/types";
+import { pushAdminNotification } from "@/lib/db";
 import {
   fetchLogs,
   fetchList,
   addDomain,
   removeDomain,
   applyParentalControl,
+  fetchParentalControlState,
   KNOWN_SERVICES,
   KNOWN_CATEGORIES,
   DNSLogEntry,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/nextdns";
 
 export default function DnsTab({
+  uid,
   config,
   update,
   save,
@@ -72,7 +75,22 @@ export default function DnsTab({
           <Toggle label="Force NextDNS" checked={config.forceDNS} onChange={(v) => update({ forceDNS: v })} />
         </Section>
         <button
-          onClick={() => save(config)}
+          onClick={async () => {
+            await save(config);
+            // The child can only install the .mobileconfig profile when B-SAFE
+            // is foregrounded — UIApplication.open(url) is rejected from a
+            // backgrounded app. Nudge the child to open B-SAFE so the existing
+            // recheckDNSOnForeground path can run the install. No-op when the
+            // child app is killed (no listener); their next manual launch picks
+            // it up via recheckDNSOnForeground anyway.
+            if (config.forceDNS && config.nextDNSProfileID) {
+              await pushAdminNotification(
+                uid,
+                "Open B-SAFE to finish DNS setup",
+                "Tap to install DNS protection on this device."
+              );
+            }
+          }}
           className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
         >
           Save
@@ -178,8 +196,51 @@ function SafetyView({
 }) {
   const [applying, setApplying] = useState(false);
 
+  // Match the iOS DNS tab: treat NextDNS as the source of truth on open.
+  // Without this the web shows whatever was last saved to Firebase, which
+  // may diverge from the live NextDNS profile (e.g. if someone changed it
+  // in NextDNS's own dashboard, or if the iOS app hasn't synced yet).
+  useEffect(() => {
+    if (!profileID || !apiKey) return;
+    let cancelled = false;
+    fetchParentalControlState(profileID, apiKey).then((state) => {
+      if (cancelled) return;
+      update({
+        safeSearchEnabled:        state.safeSearch,
+        youtubeRestrictedEnabled: state.youtubeRestricted,
+        blockedDNSServices:       state.services,
+        blockedDNSCategories:     state.categories,
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileID, apiKey]);
+
   function toggleArr(arr: string[], id: string): string[] {
     return arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id];
+  }
+
+  // NextDNS supports dozens of services/categories but our curated chip list
+  // is short. Always include items that are currently blocked on NextDNS,
+  // even if they aren't in the curated list — otherwise the UI silently
+  // omits whatever the admin set in NextDNS's own dashboard.
+  function mergeChips(known: { id: string; label: string }[], active: string[]): { id: string; label: string }[] {
+    const out = [...known];
+    const seen = new Set(known.map((k) => k.id));
+    for (const id of active) {
+      if (!seen.has(id)) {
+        out.push({ id, label: prettyLabel(id) });
+        seen.add(id);
+      }
+    }
+    return out;
+  }
+
+  function prettyLabel(id: string): string {
+    return id
+      .split(/[-_]/)
+      .map((w) => w.length ? w[0].toUpperCase() + w.slice(1) : w)
+      .join(" ");
   }
 
   return (
@@ -201,7 +262,7 @@ function SafetyView({
 
       <Section title="Block Apps">
         <div className="grid grid-cols-2 gap-2">
-          {KNOWN_SERVICES.map((s) => {
+          {mergeChips(KNOWN_SERVICES, config.blockedDNSServices).map((s) => {
             const blocked = config.blockedDNSServices.includes(s.id);
             return (
               <button
@@ -220,7 +281,7 @@ function SafetyView({
 
       <Section title="Block Categories">
         <div className="grid grid-cols-2 gap-2">
-          {KNOWN_CATEGORIES.map((c) => {
+          {mergeChips(KNOWN_CATEGORIES, config.blockedDNSCategories).map((c) => {
             const blocked = config.blockedDNSCategories.includes(c.id);
             return (
               <button

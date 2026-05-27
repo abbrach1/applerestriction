@@ -44,6 +44,11 @@ class MobileConfigService {
 
     private func generateProfile(profileID: String, removalPassword: String) -> Data {
         let serverURL = profileID.isEmpty ? "https://dns.nextdns.io" : "https://dns.nextdns.io/\(profileID)"
+        // PayloadRemovalDisallowed = true is enforced only on supervised
+        // (MDM/Apple Configurator) devices — on a regular iPhone iOS ignores
+        // it. On consumer devices the actual removal barrier is RemovalPassword,
+        // which iOS enforces at removal time. Erase-all-content is the only
+        // other bypass and is a noticeable, destructive action.
         var profile: [String: Any] = [
             "PayloadContent": [[
                 "PayloadType":        "com.apple.dnsSettings.managed",
@@ -57,7 +62,7 @@ class MobileConfigService {
             "PayloadDisplayName":       "B-SAFE DNS Protection",
             "PayloadDescription":       "Keeps this device protected with content filtering.",
             "PayloadIdentifier":        "com.abbrachfeld.bsafe.dnsprofile",
-            "PayloadRemovalDisallowed": false,
+            "PayloadRemovalDisallowed": true,
             "PayloadType":              "Configuration",
             "PayloadUUID":              "F1E2D3C4-B5A6-7890-1234-567890ABCDEF",
             "PayloadVersion":           1

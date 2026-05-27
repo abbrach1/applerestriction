@@ -168,8 +168,11 @@ class NextDNSService {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return (false, false, [], [])
         }
-        let safeSearch = json["safeSearch"] as? Bool ?? false
-        let youtubeRestricted = json["youtubeRestrictedMode"] as? Bool ?? false
+        // NextDNS wraps this endpoint's response in { data: { safeSearch, youtubeRestrictedMode, ... } }.
+        // Reading off the top level returns nil for both, so the toggles were always false on iOS too.
+        let body = (json["data"] as? [String: Any]) ?? json
+        let safeSearch = body["safeSearch"] as? Bool ?? false
+        let youtubeRestricted = body["youtubeRestrictedMode"] as? Bool ?? false
 
         // GET services
         var services: [String] = []
@@ -207,72 +210,111 @@ class NextDNSService {
 
     /// Applies SafeSearch, YouTube Restricted Mode, and blocked services/categories
     /// to the given NextDNS profile via the Parental Control API.
+    ///
+    /// Returns nil on success, or an error description for the first failing call
+    /// (PATCH or any of the per-item add/remove writes). Previously these errors
+    /// were silently swallowed via `try?`, so the admin saw a "Saved" toast even
+    /// when NextDNS rejected the payload.
+    @discardableResult
     func applyParentalControl(profileID: String,
                               apiKey: String,
                               safeSearch: Bool,
                               youtubeRestricted: Bool,
                               blockedServices: [String],
-                              blockedCategories: [String]) async {
-        guard !profileID.isEmpty, !apiKey.isEmpty else { return }
+                              blockedCategories: [String]) async -> String? {
+        guard !profileID.isEmpty, !apiKey.isEmpty else {
+            return "Missing NextDNS profile ID or API key"
+        }
 
         // 1. SafeSearch + YouTube via PATCH on parentalControl
         let body: [String: Any] = ["safeSearch": safeSearch, "youtubeRestrictedMode": youtubeRestricted]
-        if let data = try? JSONSerialization.data(withJSONObject: body),
-           let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl") {
-            var req = URLRequest(url: url)
-            req.httpMethod = "PATCH"
-            req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = data
-            _ = try? await URLSession.shared.data(for: req)
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
+              let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl") else {
+            return "Failed to encode PATCH body"
         }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = bodyData
+        if let err = await checkedSend(req) { return "PATCH parentalControl: \(err)" }
 
-        // 2. Sync blocked services
-        await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "services",
-                         activeIDs: Set(blockedServices),
-                         knownIDs: Set(PCItem.knownServices.map { $0.id }))
-
-        // 3. Sync blocked categories
-        await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "categories",
-                         activeIDs: Set(blockedCategories),
-                         knownIDs: Set(PCItem.knownCategories.map { $0.id }))
+        // 2. Sync blocked services and categories. We pass an empty knownIDs so
+        // the sync code is willing to mutate any currently-blocked item — the
+        // UI already shows the union of curated + currently-blocked, so the
+        // admin can toggle off anything they see.
+        if let err = await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "services",
+                                      activeIDs: Set(blockedServices)) {
+            return "services sync: \(err)"
+        }
+        if let err = await syncPCList(profileID: profileID, apiKey: apiKey, listPath: "categories",
+                                      activeIDs: Set(blockedCategories)) {
+            return "categories sync: \(err)"
+        }
+        return nil
     }
 
     private func syncPCList(profileID: String, apiKey: String, listPath: String,
-                            activeIDs: Set<String>, knownIDs: Set<String>) async {
-        guard let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") else { return }
+                            activeIDs: Set<String>) async -> String? {
+        guard let url = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") else {
+            return "bad URL"
+        }
         var getReq = URLRequest(url: url)
         getReq.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
-        guard let (data, _) = try? await URLSession.shared.data(for: getReq),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let arr = json["data"] as? [[String: Any]] else { return }
+        guard let (data, response) = try? await URLSession.shared.data(for: getReq) else {
+            return "GET \(listPath) network error"
+        }
+        if let http = response as? HTTPURLResponse, !(200..<300 ~= http.statusCode) {
+            return "GET \(listPath) HTTP \(http.statusCode)"
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json["data"] as? [[String: Any]] else {
+            return "GET \(listPath) parse error"
+        }
 
         let currentlyBlocked = Set(arr.compactMap { dict -> String? in
             guard dict["active"] as? Bool == true else { return nil }
             return dict["id"] as? String
         })
 
-        // Add what should be blocked but isn't.
-        // POST to the collection URL with {"id": ..., "active": true} — same pattern as allowlist/denylist.
-        if let collectionURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") {
-            for id in activeIDs where !currentlyBlocked.contains(id) {
-                var req = URLRequest(url: collectionURL)
-                req.httpMethod = "POST"
-                req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.httpBody = try? JSONSerialization.data(withJSONObject: ["id": id, "active": true])
-                _ = try? await URLSession.shared.data(for: req)
-            }
+        guard let collectionURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)") else {
+            return "bad collection URL"
         }
 
-        // Remove what's blocked but shouldn't be (only items we manage)
-        for id in currentlyBlocked where knownIDs.contains(id) && !activeIDs.contains(id) {
-            if let delURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)/\(id)") {
-                var req = URLRequest(url: delURL); req.httpMethod = "DELETE"
-                req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
-                _ = try? await URLSession.shared.data(for: req)
-            }
+        // Add what should be blocked but isn't.
+        for id in activeIDs where !currentlyBlocked.contains(id) {
+            var req = URLRequest(url: collectionURL)
+            req.httpMethod = "POST"
+            req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["id": id, "active": true])
+            if let err = await checkedSend(req) { return "POST \(listPath)/\(id): \(err)" }
         }
+
+        // Remove anything currently blocked that the admin no longer wants active.
+        // No knownIDs gate — the UI shows whatever's currently blocked, so the
+        // admin can deliberately toggle off any chip they see.
+        for id in currentlyBlocked where !activeIDs.contains(id) {
+            guard let delURL = URL(string: "\(base)/profiles/\(profileID)/parentalControl/\(listPath)/\(id)") else { continue }
+            var req = URLRequest(url: delURL); req.httpMethod = "DELETE"
+            req.setValue(apiKey, forHTTPHeaderField: "X-Api-Key")
+            if let err = await checkedSend(req) { return "DELETE \(listPath)/\(id): \(err)" }
+        }
+        return nil
+    }
+
+    /// Sends `req` and returns a non-nil error string when the network call
+    /// fails or NextDNS replies with a non-2xx status. 204 (success, no body)
+    /// counts as success.
+    private func checkedSend(_ req: URLRequest) async -> String? {
+        guard let (data, response) = try? await URLSession.shared.data(for: req) else {
+            return "network error"
+        }
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if 200..<300 ~= http.statusCode { return nil }
+        let body = String(data: data, encoding: .utf8) ?? ""
+        let trimmed = body.isEmpty ? "" : " — \(body.prefix(200))"
+        return "HTTP \(http.statusCode)\(trimmed)"
     }
 }
 

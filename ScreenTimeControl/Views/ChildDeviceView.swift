@@ -28,6 +28,19 @@ struct ChildDeviceView: View {
     @State private var showBypassResultAlert = false
     @State private var bypassSuccess = false
     @State private var showFilterLogs = false
+    @State private var showAppRequest = false
+    @State private var appRequestQuery = ""
+    @State private var appRequestResults: [ChildAppSearchResult] = []
+    @State private var appRequestIsSearching = false
+    @State private var appRequestError: String?
+    @State private var appRequestReason = ""
+    @State private var appRequestSelected: ChildAppSearchResult?
+    @State private var appRequestSending = false
+    @State private var showMyApps = false
+    #if !targetEnvironment(simulator)
+    @StateObject private var captiveDetector = CaptivePortalDetector.shared
+    @State private var myAppsSelection = FamilyActivitySelection()
+    #endif
     #if !targetEnvironment(simulator)
     @State private var appListSelection = FamilyActivitySelection()
     #endif
@@ -119,9 +132,58 @@ struct ChildDeviceView: View {
             .task {
                 await checkContentBlockerState()
                 updateInstallationBlock()
+                #if !targetEnvironment(simulator)
+                captiveDetector.start()
+                #endif
             }
+            #if !targetEnvironment(simulator)
+            .sheet(isPresented: $captiveDetector.showPrompt) {
+                CaptivePortalSheet(
+                    onOpen: { captiveDetector.openCaptivePortal() },
+                    onDismiss: { captiveDetector.showPrompt = false }
+                )
+            }
+            .sheet(isPresented: $showMyApps) {
+                MyAppsSheet(
+                    initialSelection: $myAppsSelection,
+                    existing: syncService.installedApps,
+                    onSubmit: { entries in
+                        Task {
+                            for (name, base64, isCat) in entries {
+                                await syncService.submitInstalledApp(
+                                    name: name,
+                                    selectionData: base64,
+                                    isCategory: isCat
+                                )
+                            }
+                            showMyApps = false
+                        }
+                    },
+                    onRemove: { key in
+                        Task { await syncService.removeInstalledApp(key: key) }
+                    },
+                    onClose: { showMyApps = false }
+                )
+                .environmentObject(syncService)
+            }
+            #endif
             .onChange(of: syncService.pendingApps.count) {
                 updateInstallationBlock()
+            }
+            .sheet(isPresented: $showAppRequest) {
+                AppRequestSheet(
+                    query: $appRequestQuery,
+                    results: $appRequestResults,
+                    isSearching: $appRequestIsSearching,
+                    error: $appRequestError,
+                    selected: $appRequestSelected,
+                    reason: $appRequestReason,
+                    isSending: $appRequestSending,
+                    onSearch: searchAppsForRequest,
+                    onSend: sendAppRequest,
+                    onClose: { showAppRequest = false }
+                )
+                .environmentObject(syncService)
             }
             #if !targetEnvironment(simulator)
             .sheet(isPresented: $showSendAppList) {
@@ -314,6 +376,31 @@ struct ChildDeviceView: View {
                 }
             }
         }
+        if !syncService.pendingAppRequests.isEmpty {
+            pendingCard(header: "Your App Requests", icon: "arrow.down.app") {
+                ForEach(syncService.pendingAppRequests, id: \.key) { item in
+                    HStack(spacing: 10) {
+                        AsyncImage(url: URL(string: item.request.iconURL)) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.gray.opacity(0.2))
+                        }
+                        .frame(width: 36, height: 36)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.request.appName).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                            Text("Pending admin approval").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Cancel") { Task { await syncService.cancelAppRequest(key: item.key) } }
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                    .padding(.vertical, 2)
+                    if item.key != syncService.pendingAppRequests.last?.key { Divider() }
+                }
+            }
+        }
         if syncService.pendingUnlockRequest != nil {
             pendingCard(header: "Unlock Request", icon: "lock.open.fill") {
                 HStack(spacing: 12) {
@@ -341,6 +428,20 @@ struct ChildDeviceView: View {
             }
             ChildActionButton(icon: "square.and.arrow.up", label: "Send App List", color: .teal) {
                 showSendAppList = true
+            }
+            ChildActionButton(icon: "arrow.down.app.fill", label: "Request App", color: .purple) {
+                appRequestQuery = ""
+                appRequestResults = []
+                appRequestSelected = nil
+                appRequestReason = ""
+                appRequestError = nil
+                showAppRequest = true
+            }
+            ChildActionButton(icon: "square.grid.3x3.fill", label: "My Apps", color: .indigo) {
+                #if !targetEnvironment(simulator)
+                myAppsSelection = FamilyActivitySelection()
+                #endif
+                showMyApps = true
             }
         }
         .padding(.horizontal)
@@ -430,6 +531,56 @@ struct ChildDeviceView: View {
         #if !targetEnvironment(simulator)
         settingsManager.updateInstallationBlock(hasPendingAdminApps: !syncService.pendingApps.isEmpty)
         #endif
+    }
+
+    // MARK: - App Request
+
+    private func searchAppsForRequest() async {
+        let query = appRequestQuery.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+        appRequestIsSearching = true
+        appRequestError = nil
+        appRequestResults = []
+
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=software&limit=20&country=us") else {
+            appRequestIsSearching = false; return
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["results"] as? [[String: Any]] else {
+            appRequestError = "Search failed. Check your connection."
+            appRequestIsSearching = false; return
+        }
+
+        appRequestResults = results.compactMap { item in
+            guard let trackId = item["trackId"] as? Int,
+                  let name = item["trackName"] as? String else { return nil }
+            return ChildAppSearchResult(
+                id: String(trackId),
+                name: name,
+                iconURL: item["artworkUrl100"] as? String ?? "",
+                category: item["primaryGenreName"] as? String ?? "",
+                sellerName: item["sellerName"] as? String ?? ""
+            )
+        }
+        if appRequestResults.isEmpty { appRequestError = "No apps found for \"\(query)\"." }
+        appRequestIsSearching = false
+    }
+
+    private func sendAppRequest() async {
+        guard let app = appRequestSelected else { return }
+        appRequestSending = true
+        await syncService.sendAppRequest(
+            appStoreID: app.id,
+            appName:    app.name,
+            iconURL:    app.iconURL,
+            category:   app.category,
+            sellerName: app.sellerName,
+            reason:     appRequestReason.trimmingCharacters(in: .whitespaces)
+        )
+        appRequestSending = false
+        showAppRequest = false
     }
 
     private func isWebsiteFilterActive(_ config: ScreenTimeConfiguration) -> Bool {
@@ -1289,6 +1440,319 @@ struct PendingWebsiteRow: View {
 
         isAdding = false
         added = true
+    }
+}
+
+// MARK: - App Request Sheet
+
+/// Local iTunes Search API result — never persisted, only used to build an AppRequest.
+struct ChildAppSearchResult: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let iconURL: String
+    let category: String
+    let sellerName: String
+}
+
+struct AppRequestSheet: View {
+    @Binding var query: String
+    @Binding var results: [ChildAppSearchResult]
+    @Binding var isSearching: Bool
+    @Binding var error: String?
+    @Binding var selected: ChildAppSearchResult?
+    @Binding var reason: String
+    @Binding var isSending: Bool
+    let onSearch: () async -> Void
+    let onSend: () async -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                searchBar
+                    .padding(.horizontal).padding(.top, 8).padding(.bottom, 6)
+
+                if isSearching {
+                    Spacer(); ProgressView("Searching…"); Spacer()
+                } else if let error, results.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 32)).foregroundStyle(.secondary)
+                        Text(error).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                } else if results.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.down.app").font(.system(size: 36)).foregroundStyle(.secondary)
+                        Text("Search the App Store for the app you want and ask your admin for approval.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    }
+                    Spacer()
+                } else {
+                    List(results) { app in
+                        Button { selected = app } label: {
+                            HStack(spacing: 12) {
+                                AsyncImage(url: URL(string: app.iconURL)) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.2))
+                                }
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.name).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                                    if !app.sellerName.isEmpty {
+                                        Text(app.sellerName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                if selected == app {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.purple)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
+
+                if selected != nil {
+                    Divider()
+                    VStack(spacing: 8) {
+                        TextField("Why do you need it? (optional)", text: $reason, axis: .vertical)
+                            .lineLimit(2...4)
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            Task { await onSend() }
+                        } label: {
+                            if isSending {
+                                ProgressView().tint(.white).frame(maxWidth: .infinity, minHeight: 44)
+                            } else {
+                                Text("Send Request to Admin")
+                                    .fontWeight(.semibold)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .disabled(isSending)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                }
+            }
+            .navigationTitle("Request App")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { onClose() }
+                }
+            }
+        }
+    }
+
+    private var searchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search the App Store…", text: $query)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .onSubmit { Task { await onSearch() } }
+            if !query.isEmpty {
+                Button { query = ""; results = []; error = nil; selected = nil } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+            }
+            Button("Search") { Task { await onSearch() } }
+                .font(.subheadline).fontWeight(.medium)
+                .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+// MARK: - My Apps Sheet (child labels their installed apps for the admin)
+
+#if !targetEnvironment(simulator)
+import FamilyControls
+import ManagedSettings
+
+struct MyAppsSheet: View {
+    @Binding var initialSelection: FamilyActivitySelection
+    let existing: [(key: String, app: InstalledApp)]
+    /// onSubmit receives an array of (name, single-token base64 selection, isCategory) entries.
+    let onSubmit: ([(String, String, Bool)]) -> Void
+    let onRemove: (String) -> Void
+    let onClose: () -> Void
+
+    @State private var showPicker = false
+    @State private var nameForApp: [ApplicationToken: String] = [:]
+    @State private var nameForCat: [ActivityCategoryToken: String] = [:]
+    @State private var submitting = false
+
+    private var hasPendingNames: Bool {
+        !initialSelection.applicationTokens.isEmpty || !initialSelection.categoryTokens.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Pick the apps you have, then type the name for each. Your admin sees this list and can set time limits per app.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button {
+                        showPicker = true
+                    } label: {
+                        Label("Pick Apps to Add", systemImage: "plus.app")
+                    }
+                }
+
+                if hasPendingNames {
+                    Section {
+                        ForEach(Array(initialSelection.applicationTokens), id: \.self) { token in
+                            HStack(spacing: 10) {
+                                Label(token).labelStyle(.iconOnly).frame(width: 32, height: 32)
+                                TextField("Name (e.g. Instagram)", text: Binding(
+                                    get: { nameForApp[token] ?? "" },
+                                    set: { nameForApp[token] = $0 }
+                                ))
+                            }
+                        }
+                        ForEach(Array(initialSelection.categoryTokens), id: \.self) { token in
+                            HStack(spacing: 10) {
+                                Label(token).labelStyle(.iconOnly).frame(width: 32, height: 32)
+                                TextField("Category name (e.g. Social Media)", text: Binding(
+                                    get: { nameForCat[token] ?? "" },
+                                    set: { nameForCat[token] = $0 }
+                                ))
+                            }
+                        }
+                        Button {
+                            submitAll()
+                        } label: {
+                            HStack {
+                                if submitting { ProgressView() } else { Image(systemName: "checkmark.circle.fill") }
+                                Text(submitting ? "Saving…" : "Save All")
+                            }
+                        }
+                        .disabled(submitting || !allNamed)
+                    } header: { Text("Name Each") }
+                      footer: { Text("Each app needs a name before it can be saved.") }
+                }
+
+                if !existing.isEmpty {
+                    Section {
+                        ForEach(existing, id: \.key) { item in
+                            HStack {
+                                Text(item.app.name.isEmpty ? "(unnamed)" : item.app.name)
+                                if item.app.isCategory {
+                                    Text("category").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(role: .destructive) { onRemove(item.key) } label: {
+                                    Image(systemName: "trash").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    } header: { Text("My App Library (\(existing.count))") }
+                }
+            }
+            .navigationTitle("My Apps")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { onClose() }
+                }
+            }
+            .familyActivityPicker(isPresented: $showPicker, selection: $initialSelection)
+        }
+    }
+
+    private var allNamed: Bool {
+        for token in initialSelection.applicationTokens {
+            if (nameForApp[token] ?? "").trimmingCharacters(in: .whitespaces).isEmpty { return false }
+        }
+        for token in initialSelection.categoryTokens {
+            if (nameForCat[token] ?? "").trimmingCharacters(in: .whitespaces).isEmpty { return false }
+        }
+        return true
+    }
+
+    private func submitAll() {
+        submitting = true
+        var entries: [(String, String, Bool)] = []
+        let encoder = JSONEncoder()
+        for token in initialSelection.applicationTokens {
+            let name = (nameForApp[token] ?? "").trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            var single = FamilyActivitySelection()
+            single.applicationTokens = [token]
+            if let data = try? encoder.encode(single) {
+                entries.append((name, data.base64EncodedString(), false))
+            }
+        }
+        for token in initialSelection.categoryTokens {
+            let name = (nameForCat[token] ?? "").trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            var single = FamilyActivitySelection()
+            single.categoryTokens = [token]
+            if let data = try? encoder.encode(single) {
+                entries.append((name, data.base64EncodedString(), true))
+            }
+        }
+        onSubmit(entries)
+        // Clear so the sheet can be reused for another batch.
+        initialSelection = FamilyActivitySelection()
+        nameForApp.removeAll()
+        nameForCat.removeAll()
+        submitting = false
+    }
+}
+#endif
+
+// MARK: - Captive Portal Sheet
+
+/// Shown when the child device is on Wi-Fi but Firebase can't reach the
+/// server — a strong signal the network has a captive portal (hotel /
+/// coffee shop / school) and the forced DoH profile can't punch through.
+struct CaptivePortalSheet: View {
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 56))
+                .foregroundStyle(.orange)
+            Text("Wi-Fi Sign-in Required")
+                .font(.title2).fontWeight(.bold)
+            Text("This network looks like it needs a login page before it lets traffic through. Because B-SAFE forces secure DNS, the device can't reach the login page on its own.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Spacer()
+            Button { onOpen() } label: {
+                Text("Open Login Page")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 24)
+
+            Button("Dismiss", action: onDismiss)
+                .padding(.bottom, 32)
+        }
+        .padding(.top, 32)
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled(false)
     }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ScreenTimeConfiguration, RecommendedApp } from "@/lib/types";
+import { ScreenTimeConfiguration, RecommendedApp, InstalledApp } from "@/lib/types";
 import { searchApps, AppSearchResult } from "@/lib/itunes";
 import {
   pushRecommendedApp,
@@ -11,6 +11,7 @@ import {
   markAppListReviewed,
   setEmergencyBypassCode,
   pushAdminNotification,
+  subscribeInstalledApps,
 } from "@/lib/db";
 
 export default function AppsTab({
@@ -36,11 +37,16 @@ export default function AppsTab({
     timestamp: number;
     reviewed: boolean;
   } | null>(null);
+  const [library, setLibrary] = useState<{ pushKey: string; app: InstalledApp }[]>([]);
+  const [showAddLimit, setShowAddLimit] = useState(false);
+  const [pickedLibraryKey, setPickedLibraryKey] = useState<string | null>(null);
+  const [newLimitMinutes, setNewLimitMinutes] = useState(60);
 
   useEffect(() => {
     const unsub = subscribePendingApps(uid, setPending);
+    const unsubLib = subscribeInstalledApps(uid, setLibrary);
     loadAppListReport(uid).then(setReport);
-    return () => unsub();
+    return () => { unsub(); unsubLib(); };
   }, [uid]);
 
   async function doSearch() {
@@ -179,6 +185,70 @@ export default function AppsTab({
         />
       </Section>
 
+      <Section
+        title="Daily Time Limits"
+        footer="Each limit covers an app from the child's labeled library. When the daily budget runs out, the apps shield until midnight."
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500">
+            {library.length === 0
+              ? "Child hasn't submitted their app library yet — open B-SAFE on the device → My Apps."
+              : `${library.length} app${library.length === 1 ? "" : "s"} in the child's library.`}
+          </span>
+          <button
+            onClick={() => {
+              setPickedLibraryKey(null);
+              setNewLimitMinutes(60);
+              setShowAddLimit(true);
+            }}
+            disabled={library.length === 0}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            + Add Time Limit
+          </button>
+        </div>
+        {config.appTimeLimits.length === 0 ? (
+          <p className="text-sm text-gray-400">
+            No daily limits set. Open the iOS admin app → Apps tab → Add Time Limit.
+          </p>
+        ) : (
+          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+            {config.appTimeLimits.map((limit, idx) => (
+              <li key={limit.id || idx} className="flex items-center gap-3 px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <div className="truncate text-sm font-medium">{limit.displayName || "Untitled limit"}</div>
+                  <div className="text-xs text-gray-500">{limit.timeLimitMinutes} min/day</div>
+                </div>
+                <input
+                  type="number"
+                  min={5}
+                  max={720}
+                  step={5}
+                  value={limit.timeLimitMinutes}
+                  onChange={(e) => {
+                    const v = Math.max(5, Math.min(720, Number(e.target.value) || 5));
+                    const next = [...config.appTimeLimits];
+                    next[idx] = { ...next[idx], timeLimitMinutes: v };
+                    update({ appTimeLimits: next });
+                  }}
+                  className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                  aria-label="Minutes per day"
+                />
+                <button
+                  onClick={() => {
+                    const next = config.appTimeLimits.filter((_, i) => i !== idx);
+                    update({ appTimeLimits: next });
+                  }}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
       <button
         onClick={() => save(config, config.isLocked ? "lockDevice" : "updateBlockedApps")}
         className="w-full rounded-lg bg-orange-500 py-3 text-sm font-semibold text-white hover:bg-orange-600"
@@ -188,6 +258,118 @@ export default function AppsTab({
 
       <EmergencyBypass uid={uid} />
       <PushNotificationSection uid={uid} />
+
+      {showAddLimit && (
+        <AddTimeLimitModal
+          library={library}
+          pickedKey={pickedLibraryKey}
+          setPickedKey={setPickedLibraryKey}
+          minutes={newLimitMinutes}
+          setMinutes={setNewLimitMinutes}
+          onCancel={() => setShowAddLimit(false)}
+          onSave={() => {
+            const entry = library.find((l) => l.pushKey === pickedLibraryKey);
+            if (!entry) return;
+            update({
+              appTimeLimits: [
+                ...config.appTimeLimits,
+                {
+                  id: crypto.randomUUID(),
+                  selectionData: entry.app.selectionData,
+                  displayName: entry.app.name,
+                  timeLimitMinutes: newLimitMinutes,
+                  isCategory: !!entry.app.isCategory,
+                },
+              ],
+            });
+            setShowAddLimit(false);
+            setPickedLibraryKey(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddTimeLimitModal({
+  library,
+  pickedKey,
+  setPickedKey,
+  minutes,
+  setMinutes,
+  onCancel,
+  onSave,
+}: {
+  library: { pushKey: string; app: InstalledApp }[];
+  pickedKey: string | null;
+  setPickedKey: (k: string | null) => void;
+  minutes: number;
+  setMinutes: (n: number) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">New Time Limit</h2>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-700" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              App from child&apos;s library
+            </div>
+            <div className="max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white">
+              {library.map((item) => (
+                <button
+                  key={item.pushKey}
+                  onClick={() => setPickedKey(item.pushKey)}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors ${
+                    pickedKey === item.pushKey ? "bg-blue-50 text-blue-900" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <span>{item.app.name || "(unnamed)"}</span>
+                  {item.app.isCategory && (
+                    <span className="text-xs text-slate-400">category</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Minutes per day
+            </div>
+            <input
+              type="number"
+              min={5}
+              max={720}
+              step={5}
+              value={minutes}
+              onChange={(e) => setMinutes(Math.max(5, Math.min(720, Number(e.target.value) || 60)))}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onSave}
+              disabled={!pickedKey}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

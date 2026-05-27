@@ -451,7 +451,7 @@ struct TabWebView: UIViewRepresentable {
 
             let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
             let allowed = parent.allowedWebsites.contains { d in
-                let domain = d.lowercased()
+                guard let domain = DomainNormalizer.normalize(d) else { return false }
                 return bare == domain || bare.hasSuffix(".\(domain)")
             }
 

@@ -80,13 +80,39 @@ enum WebFilterMode: String, Codable {
 }
 
 // MARK: - App Time Limit
+//
+// Each AppTimeLimit represents one app (or category) with a daily minute cap.
+// `selectionData` is a base64-encoded FamilyActivitySelection that contains
+// exactly one token (application OR category, depending on isCategory).
+// We piggyback on the same selection-blob pattern used by blockedAppsSelectionData
+// so cross-device token transfer works the same way.
 
 struct AppTimeLimit: Codable, Identifiable, Hashable {
     var id: String = UUID().uuidString
-    var appToken: String
+    var selectionData: String      // base64 JSON of FamilyActivitySelection
     var displayName: String
     var timeLimitMinutes: Int
     var isCategory: Bool = false
+}
+
+extension AppTimeLimit {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id               = try c.decodeIfPresent(String.self, forKey: .id)               ?? UUID().uuidString
+        displayName      = try c.decodeIfPresent(String.self, forKey: .displayName)      ?? ""
+        timeLimitMinutes = try c.decodeIfPresent(Int.self,    forKey: .timeLimitMinutes) ?? 0
+        isCategory       = try c.decodeIfPresent(Bool.self,   forKey: .isCategory)       ?? false
+        // Accept either the new `selectionData` field or the legacy `appToken` name.
+        if let s = try c.decodeIfPresent(String.self, forKey: .selectionData) {
+            selectionData = s
+        } else if let legacy = try? c.decodeIfPresent(String.self, forKey: AppTokenKey.appToken) {
+            selectionData = legacy ?? ""
+        } else {
+            selectionData = ""
+        }
+    }
+
+    private enum AppTokenKey: String, CodingKey { case appToken }
 }
 
 // MARK: - Downtime Schedule
@@ -220,6 +246,71 @@ extension WebsiteRequest {
         reason     = try c.decodeIfPresent(String.self, forKey: .reason)     ?? ""
         timestamp  = try c.decodeIfPresent(Date.self,   forKey: .timestamp)  ?? Date()
         deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
+    }
+}
+
+// MARK: - Installed App (child → admin, stored at /users/uid/installedApps/{autoId})
+//
+// Apple's FamilyActivityPicker returns opaque ApplicationToken values that can
+// never be turned into a human-readable name from outside Apple's own views.
+// To let the *admin* set per-app time limits without ever touching the child's
+// device, the child labels each app themselves: pick it in the picker → type
+// a name → submit. The admin (web or iOS) then sees a list of named apps and
+// can pick one + minutes to create a time limit. The selectionData blob travels
+// through to AppTimeLimit so the actual enforcement code on the child's device
+// stays exactly the same.
+
+struct InstalledApp: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var name: String = ""               // child-typed
+    var selectionData: String = ""      // base64 JSON of a single-token FamilyActivitySelection
+    var isCategory: Bool = false
+    var createdAt: Date = Date()
+}
+
+extension InstalledApp {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id            = try c.decodeIfPresent(String.self, forKey: .id)            ?? UUID().uuidString
+        name          = try c.decodeIfPresent(String.self, forKey: .name)          ?? ""
+        selectionData = try c.decodeIfPresent(String.self, forKey: .selectionData) ?? ""
+        isCategory    = try c.decodeIfPresent(Bool.self,   forKey: .isCategory)    ?? false
+        createdAt     = try c.decodeIfPresent(Date.self,   forKey: .createdAt)     ?? Date()
+    }
+}
+
+// MARK: - App Request (child → admin, stored at /users/uid/appRequests/{autoId})
+//
+// Mirrors WebsiteRequest. The child searches the iTunes Search API inside
+// B-SAFE (which never touches the App Store app), picks an app, gives a
+// reason, and writes one of these. Admin approve → push a RecommendedApp to
+// pendingApps which the existing SKOverlay path installs without needing
+// the App Store to be unblocked.
+
+struct AppRequest: Codable, Identifiable {
+    var id: String = UUID().uuidString
+    var appStoreID: String = ""
+    var appName: String = ""
+    var iconURL: String = ""
+    var category: String = ""
+    var sellerName: String = ""
+    var reason: String = ""
+    var timestamp: Date = Date()
+    var deviceName: String = ""
+}
+
+extension AppRequest {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decodeIfPresent(String.self, forKey: .id)          ?? UUID().uuidString
+        appStoreID  = try c.decodeIfPresent(String.self, forKey: .appStoreID)  ?? ""
+        appName     = try c.decodeIfPresent(String.self, forKey: .appName)     ?? ""
+        iconURL     = try c.decodeIfPresent(String.self, forKey: .iconURL)     ?? ""
+        category    = try c.decodeIfPresent(String.self, forKey: .category)    ?? ""
+        sellerName  = try c.decodeIfPresent(String.self, forKey: .sellerName)  ?? ""
+        reason      = try c.decodeIfPresent(String.self, forKey: .reason)      ?? ""
+        timestamp   = try c.decodeIfPresent(Date.self,   forKey: .timestamp)   ?? Date()
+        deviceName  = try c.decodeIfPresent(String.self, forKey: .deviceName)  ?? ""
     }
 }
 

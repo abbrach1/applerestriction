@@ -17,8 +17,17 @@ export interface DNSListEntry {
 
 async function call(path: string, init?: RequestInit) {
   const res = await fetch(`/api/nextdns?path=${encodeURIComponent(path)}`, init);
-  if (!res.ok) throw new Error(`NextDNS error: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    // Surface NextDNS's error body so 500s don't show up as opaque "NextDNS error: 500".
+    let body = "";
+    try { body = await res.text(); } catch {}
+    console.error("[NextDNS]", init?.method || "GET", path, "→", res.status, body);
+    throw new Error(`NextDNS error: ${res.status}${body ? ` — ${body.slice(0, 300)}` : ""}`);
+  }
+  // 204 No Content has no body — guard against res.json() throwing.
+  if (res.status === 204) return null;
+  const ct = res.headers.get("Content-Type") || "";
+  return ct.includes("json") ? res.json() : res.text();
 }
 
 export async function fetchLogs(profileID: string, apiKey: string, limit = 100): Promise<DNSLogEntry[]> {
@@ -56,6 +65,51 @@ export async function removeDomain(profileID: string, apiKey: string, endpoint: 
   });
 }
 
+/// Read the current parental-control state from the NextDNS profile.
+/// Mirrors `NextDNSService.fetchParentalControlState` on iOS. The iOS DNS
+/// tab calls this on open and treats NextDNS as the source of truth — the
+/// web should do the same so both clients show the same values.
+export async function fetchParentalControlState(
+  profileID: string,
+  apiKey: string,
+): Promise<{
+  safeSearch: boolean;
+  youtubeRestricted: boolean;
+  services: string[];
+  categories: string[];
+}> {
+  const empty = { safeSearch: false, youtubeRestricted: false, services: [], categories: [] };
+  try {
+    const root = await call(`profiles/${profileID}/parentalControl`, {
+      headers: { "X-Forward-Api-Key": apiKey },
+    });
+    const services = await call(`profiles/${profileID}/parentalControl/services`, {
+      headers: { "X-Forward-Api-Key": apiKey },
+    });
+    const categories = await call(`profiles/${profileID}/parentalControl/categories`, {
+      headers: { "X-Forward-Api-Key": apiKey },
+    });
+    // NextDNS wraps the root parentalControl response in { data: { safeSearch, … } }.
+    // The /services and /categories sub-endpoints are also wrapped: { data: [...] }.
+    const r =
+      root && typeof root === "object" && "data" in root && root.data
+        ? (root as { data: Record<string, unknown> }).data
+        : (root as Record<string, unknown>);
+
+    return {
+      safeSearch:        !!r?.safeSearch,
+      youtubeRestricted: !!r?.youtubeRestrictedMode,
+      // NextDNS's /services and /categories endpoints return only the currently-active items,
+      // not the full catalog. Filtering for `active` is defensive in case that ever changes.
+      services:   (services?.data || []).filter((d: { active?: boolean }) => d.active).map((d: { id: string }) => d.id),
+      categories: (categories?.data || []).filter((d: { active?: boolean }) => d.active).map((d: { id: string }) => d.id),
+    };
+  } catch (e) {
+    console.error("[B-SAFE] fetchParentalControlState failed:", e);
+    return empty;
+  }
+}
+
 export async function applyParentalControl(
   profileID: string,
   apiKey: string,
@@ -70,15 +124,15 @@ export async function applyParentalControl(
     headers: { "X-Forward-Api-Key": apiKey, "Content-Type": "application/json" },
     body: JSON.stringify({ safeSearch, youtubeRestrictedMode: youtubeRestricted }),
   });
-  await syncPC(profileID, apiKey, "services", blockedServices, KNOWN_SERVICES.map((s) => s.id));
-  await syncPC(profileID, apiKey, "categories", blockedCategories, KNOWN_CATEGORIES.map((s) => s.id));
+  await syncPC(profileID, apiKey, "services", blockedServices);
+  await syncPC(profileID, apiKey, "categories", blockedCategories);
 }
 
-async function syncPC(profileID: string, apiKey: string, listPath: string, activeIDs: string[], knownIDs: string[]) {
+async function syncPC(profileID: string, apiKey: string, listPath: string, activeIDs: string[]) {
   const data = await call(`profiles/${profileID}/parentalControl/${listPath}`, {
     headers: { "X-Forward-Api-Key": apiKey },
   });
-  const currently: string[] = (data.data || []).filter((d: any) => d.active).map((d: any) => d.id);
+  const currently: string[] = (data.data || []).filter((d: { active?: boolean }) => d.active).map((d: { id: string }) => d.id);
   const active = new Set(activeIDs);
   const cur = new Set(currently);
   for (const id of activeIDs) {
@@ -90,8 +144,11 @@ async function syncPC(profileID: string, apiKey: string, listPath: string, activ
       });
     }
   }
+  // Remove any currently-blocked item the admin no longer wants active.
+  // No "known IDs" guard — the UI renders the union of curated + currently-
+  // blocked, so admins can deliberately toggle off any chip they see.
   for (const id of currently) {
-    if (knownIDs.includes(id) && !active.has(id)) {
+    if (!active.has(id)) {
       await call(`profiles/${profileID}/parentalControl/${listPath}/${id}`, {
         method: "DELETE",
         headers: { "X-Forward-Api-Key": apiKey },

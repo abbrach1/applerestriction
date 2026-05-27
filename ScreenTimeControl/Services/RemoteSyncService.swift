@@ -21,10 +21,27 @@ class RemoteSyncService: ObservableObject {
     @Published var isOnline: Bool = true
     @Published var dnsProtectionMissing: Bool = false
     @Published var pendingWebsites: [String: String] = [:]
-    @Published var pendingApps: [String: RecommendedApp] = [:]
+    @Published var pendingApps: [String: RecommendedApp] = [:] {
+        didSet {
+            // Open the install gate the moment admin pushes an app — without
+            // this, ChildDeviceView has to be on-screen to flip denyAppInstallation,
+            // so an admin push that arrives while the child is on another tab
+            // leaves SKOverlay's GET button non-functional.
+            #if !targetEnvironment(simulator)
+            let hasPending = !pendingApps.isEmpty
+            Task { @MainActor in
+                ScreenTimeSettingsManager.shared.updateInstallationBlock(
+                    hasPendingAdminApps: hasPending
+                )
+            }
+            #endif
+        }
+    }
     @Published var displayName: String = ""
     @Published var pendingUnlockRequest: (key: String, request: UnlockRequest)? = nil
     @Published var pendingWebsiteRequests: [(key: String, request: WebsiteRequest)] = []
+    @Published var pendingAppRequests:     [(key: String, request: AppRequest)]     = []
+    @Published var installedApps:          [(key: String, app: InstalledApp)]       = []
 
     // Keep for legacy compatibility
     @Published var isPaired: Bool = false
@@ -37,6 +54,8 @@ class RemoteSyncService: ObservableObject {
     // Still used by admin REST calls and manualSync fallback
     private let firebaseURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
+    private var dnsRecheckTimer: Timer?
+
     private init() {
         // Re-check DNS profile whenever app returns to foreground
         NotificationCenter.default.addObserver(
@@ -47,8 +66,38 @@ class RemoteSyncService: ObservableObject {
             Task { @MainActor [weak self] in
                 await self?.recheckDNSOnForeground()
                 self?.checkScheduledRelock()
+                self?.startDNSRecheckTimer()
             }
         }
+
+        // Stop polling DNS health while in background — iOS will suspend
+        // timers anyway, but this avoids a stale tick on return.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.stopDNSRecheckTimer() }
+        }
+
+        startDNSRecheckTimer()
+    }
+
+    /// Polls the NextDNS test endpoint every 90s while the app is in foreground
+    /// so a child who removes the DNS profile is caught and the auto-reapply
+    /// flow runs within seconds, not "whenever the app is next opened."
+    private func startDNSRecheckTimer() {
+        dnsRecheckTimer?.invalidate()
+        dnsRecheckTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.recheckDNSOnForeground()
+            }
+        }
+    }
+
+    private func stopDNSRecheckTimer() {
+        dnsRecheckTimer?.invalidate()
+        dnsRecheckTimer = nil
     }
 
     #if !targetEnvironment(simulator)
@@ -254,6 +303,47 @@ class RemoteSyncService: ObservableObject {
             let sorted = result.sorted { $0.request.timestamp > $1.request.timestamp }
             await MainActor.run { self.pendingWebsiteRequests = sorted }
         }
+
+        // App requests — show child their pending app requests
+        observe(userRef.child("appRequests")) { [weak self] snapshot in
+            guard let self else { return }
+            guard let dict = snapshot.value as? [String: Any] else {
+                await MainActor.run { self.pendingAppRequests = [] }
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            var result: [(key: String, request: AppRequest)] = []
+            for (key, val) in dict {
+                if let data = try? JSONSerialization.data(withJSONObject: val),
+                   let req = try? decoder.decode(AppRequest.self, from: data) {
+                    result.append((key, req))
+                }
+            }
+            let sorted = result.sorted { $0.request.timestamp > $1.request.timestamp }
+            await MainActor.run { self.pendingAppRequests = sorted }
+        }
+
+        // Installed apps — the child's labeled app library, used by the admin
+        // to pick which app a time limit should apply to.
+        observe(userRef.child("installedApps")) { [weak self] snapshot in
+            guard let self else { return }
+            guard let dict = snapshot.value as? [String: Any] else {
+                await MainActor.run { self.installedApps = [] }
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            var result: [(key: String, app: InstalledApp)] = []
+            for (key, val) in dict {
+                if let data = try? JSONSerialization.data(withJSONObject: val),
+                   let app = try? decoder.decode(InstalledApp.self, from: data) {
+                    result.append((key, app))
+                }
+            }
+            let sorted = result.sorted { $0.app.name.lowercased() < $1.app.name.lowercased() }
+            await MainActor.run { self.installedApps = sorted }
+        }
     }
 
     func stopListening() {
@@ -409,6 +499,74 @@ class RemoteSyncService: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         _ = try? await dbRef.child("users/\(uid)/websiteRequests/\(key)").removeValue()
         pendingWebsiteRequests.removeAll { $0.key == key }
+    }
+
+    // MARK: - App Requests
+
+    /// Child-initiated request to install a specific App Store app. Search
+    /// happens inside B-SAFE via the public iTunes Search API, so the device's
+    /// App Store does NOT need to be unblocked for the child to find apps.
+    /// Admin approves → existing pendingApps + SKOverlay path installs it.
+    func sendAppRequest(appStoreID: String,
+                        appName: String,
+                        iconURL: String,
+                        category: String,
+                        sellerName: String,
+                        reason: String) async {
+        guard let uid = Auth.auth().currentUser?.uid, !appStoreID.isEmpty else { return }
+        var req = AppRequest()
+        req.appStoreID = appStoreID
+        req.appName    = appName
+        req.iconURL    = iconURL
+        req.category   = category
+        req.sellerName = sellerName
+        req.reason     = reason
+        req.timestamp  = Date()
+        req.deviceName = DeviceInfo.current.name
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let data = try? encoder.encode(req),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        _ = try? await dbRef.child("users/\(uid)/appRequests").childByAutoId().setValue(dict)
+        let name = displayName.isEmpty ? DeviceInfo.current.name : displayName
+        await sendFCMToAdmin(
+            title: "📲 App Request",
+            body: "\(name) wants to install \(appName)\(reason.isEmpty ? "" : " — \(reason)")"
+        )
+    }
+
+    func cancelAppRequest(key: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        _ = try? await dbRef.child("users/\(uid)/appRequests/\(key)").removeValue()
+        pendingAppRequests.removeAll { $0.key == key }
+    }
+
+    // MARK: - Installed App Library (child labels their apps for the admin)
+
+    func submitInstalledApp(name: String, selectionData: String, isCategory: Bool) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        var app = InstalledApp()
+        app.name          = name.trimmingCharacters(in: .whitespaces)
+        app.selectionData = selectionData
+        app.isCategory    = isCategory
+        app.createdAt     = Date()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        guard let data = try? encoder.encode(app),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        _ = try? await dbRef.child("users/\(uid)/installedApps").childByAutoId().setValue(dict)
+    }
+
+    func removeInstalledApp(key: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        _ = try? await dbRef.child("users/\(uid)/installedApps/\(key)").removeValue()
+        installedApps.removeAll { $0.key == key }
+    }
+
+    func renameInstalledApp(key: String, name: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        _ = try? await dbRef.child("users/\(uid)/installedApps/\(key)/name").setValue(trimmed)
     }
 
     // MARK: - FCM Push to Admin (v1 API)
