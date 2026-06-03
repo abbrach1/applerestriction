@@ -106,9 +106,8 @@ extension AppTimeLimit {
         if let s = try c.decodeIfPresent(String.self, forKey: .selectionData) {
             selectionData = s
         } else if let legacyC = try? decoder.container(keyedBy: AppTokenKey.self),
-                  let legacy = try? legacyC.decodeIfPresent(String.self, forKey: .appToken),
-                  let value = legacy {
-            selectionData = value
+                  let legacy = try? legacyC.decodeIfPresent(String.self, forKey: .appToken) {
+            selectionData = legacy
         } else {
             selectionData = ""
         }
