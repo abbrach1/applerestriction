@@ -37,6 +37,7 @@
 		A10050 /* SafeBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10050 /* SafeBrowserView.swift */; };
 		BDCBC9AA2F82C08C000E9E56 /* BSAFEContentBlocker.appex in Embed Extensions */ = {isa = PBXBuildFile; fileRef = BDCBC9A12F82C08B000E9E56 /* BSAFEContentBlocker.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10060 /* ContentFilterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10060 /* ContentFilterService.swift */; };
+		A10090 /* FCMv1Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10090 /* FCMv1Service.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -75,6 +76,7 @@
 		B10040 /* ContentBlockerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlockerService.swift; sourceTree = "<group>"; };
 		B10041 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		B10051 /* NextDNSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextDNSService.swift; sourceTree = "<group>"; };
+		B10090 /* FCMv1Service.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FCMv1Service.swift; sourceTree = "<group>"; };
 		B10009 /* SharedDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedDefaults.swift; sourceTree = "<group>"; };
 		B10070 /* DomainNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainNormalizer.swift; sourceTree = "<group>"; };
 		B10080 /* CaptivePortalDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptivePortalDetector.swift; sourceTree = "<group>"; };
@@ -204,6 +206,7 @@
 				B10022 /* FirebaseAuthService.swift */,
 				B10040 /* ContentBlockerService.swift */,
 				B10051 /* NextDNSService.swift */,
+				B10090 /* FCMv1Service.swift */,
 				B10060 /* ContentFilterService.swift */,
 				B10080 /* CaptivePortalDetector.swift */,
 			);
@@ -446,6 +449,7 @@
 				A10050 /* SafeBrowserView.swift in Sources */,
 				A10051 /* NextDNSService.swift in Sources */,
 				A10060 /* ContentFilterService.swift in Sources */,
+				A10090 /* FCMv1Service.swift in Sources */,
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,

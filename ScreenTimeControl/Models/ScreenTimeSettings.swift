@@ -105,8 +105,10 @@ extension AppTimeLimit {
         // Accept either the new `selectionData` field or the legacy `appToken` name.
         if let s = try c.decodeIfPresent(String.self, forKey: .selectionData) {
             selectionData = s
-        } else if let legacy = try? c.decodeIfPresent(String.self, forKey: AppTokenKey.appToken) {
-            selectionData = legacy ?? ""
+        } else if let legacyC = try? decoder.container(keyedBy: AppTokenKey.self),
+                  let legacy = try? legacyC.decodeIfPresent(String.self, forKey: .appToken),
+                  let value = legacy {
+            selectionData = value
         } else {
             selectionData = ""
         }
