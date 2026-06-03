@@ -12,10 +12,34 @@ export interface DowntimeSchedule {
 
 export interface AppTimeLimit {
   id: string;
-  appToken: string;
+  selectionData: string;   // base64 JSON of FamilyActivitySelection (was `appToken` in legacy data)
   displayName: string;
   timeLimitMinutes: number;
   isCategory: boolean;
+}
+
+/// Child-submitted "I have this app, here's what it's called." The selectionData
+/// is opaque (base64 JSON of a single-token iOS FamilyActivitySelection), but
+/// the web doesn't need to decode it — it passes the blob through to the
+/// AppTimeLimit when admin picks this entry.
+export interface InstalledApp {
+  id: string;
+  name: string;
+  selectionData: string;
+  isCategory: boolean;
+  createdAt: string | number;
+}
+
+export interface AppRequest {
+  id: string;
+  appStoreID: string;
+  appName: string;
+  iconURL: string;
+  category: string;
+  sellerName: string;
+  reason: string;
+  timestamp: string | number;
+  deviceName: string;
 }
 
 export interface ScreenTimeConfiguration {
@@ -54,7 +78,7 @@ export interface ManagedUser {
   displayName: string;
   deviceName: string;
   isOnline: boolean;
-  lastSeen: string;
+  lastSeen: number;   // Unix ms — Firebase server timestamp written by the iOS app
 }
 
 export interface TamperAlert {

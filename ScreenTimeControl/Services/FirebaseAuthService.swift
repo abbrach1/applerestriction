@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import FirebaseCore
+import FirebaseDatabase
 
 let adminEmail = "abbrachfeld@gmail.com"
 
@@ -64,6 +66,72 @@ class FirebaseAuthService: ObservableObject {
     /// Used by REST API calls in the admin dashboard.
     func freshToken() async -> String? {
         return try? await Auth.auth().currentUser?.getIDToken(forcingRefresh: false)
+    }
+
+    // MARK: - Admin: Create / Manage Managed Users
+
+    /// Create a Firebase Auth user + a /users/{uid}/info node, without losing
+    /// the admin's current sign-in session. We do the create against a secondary
+    /// FirebaseApp instance and tear it down when done.
+    func createManagedUser(email: String, password: String, displayName: String, deviceName: String) async throws -> String {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !trimmedEmail.isEmpty, password.count >= 6 else {
+            throw NSError(domain: "B-SAFE", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Email is required and password must be at least 6 characters."])
+        }
+
+        guard let primaryOptions = FirebaseApp.app()?.options else {
+            throw NSError(domain: "B-SAFE", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Firebase not configured."])
+        }
+
+        let secondaryName = "bsafe-secondary-\(Int(Date().timeIntervalSince1970 * 1000))"
+        FirebaseApp.configure(name: secondaryName, options: primaryOptions)
+        guard let secondary = FirebaseApp.app(name: secondaryName) else {
+            throw NSError(domain: "B-SAFE", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to create secondary Firebase app."])
+        }
+        let secondaryAuth = Auth.auth(app: secondary)
+
+        defer {
+            // Always tear down the secondary instance, even on error.
+            Task { await secondary.delete() }
+        }
+
+        let result = try await secondaryAuth.createUser(withEmail: trimmedEmail, password: password)
+        let uid = result.user.uid
+
+        // Write the profile node so loadUsers picks it up immediately.
+        let infoRef = Database.database(app: secondary).reference(withPath: "users/\(uid)/info")
+        let payload: [String: Any] = [
+            "email":          trimmedEmail,
+            "displayName":    displayName.trimmingCharacters(in: .whitespaces),
+            "deviceName":     deviceName.trimmingCharacters(in: .whitespaces),
+            "isOnline":       false,
+            "lastSeen":       Int(Date().timeIntervalSince1970 * 1000),
+            "createdByAdmin": Auth.auth().currentUser?.uid ?? "",
+            "createdAt":      Int(Date().timeIntervalSince1970 * 1000),
+        ]
+        try await infoRef.setValue(payload)
+
+        try? secondaryAuth.signOut()
+        return uid
+    }
+
+    /// Update a managed user's display / device name in Realtime DB.
+    /// Email and password changes go through dedicated paths.
+    func updateManagedUser(uid: String, displayName: String?, deviceName: String?) async throws {
+        var patch: [String: Any] = [:]
+        if let d = displayName { patch["displayName"] = d.trimmingCharacters(in: .whitespaces) }
+        if let d = deviceName  { patch["deviceName"]  = d.trimmingCharacters(in: .whitespaces) }
+        guard !patch.isEmpty else { return }
+        try await Database.database().reference(withPath: "users/\(uid)/info").updateChildValues(patch)
+    }
+
+    /// Trigger a Firebase Auth password-reset email. The client SDK has no way
+    /// to set a password directly for another user without the Admin SDK.
+    func sendPasswordReset(email: String) async throws {
+        try await Auth.auth().sendPasswordReset(withEmail: email.trimmingCharacters(in: .whitespaces).lowercased())
     }
 
     // MARK: - Error Messages

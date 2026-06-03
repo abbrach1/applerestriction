@@ -61,36 +61,39 @@ class ContentBlockerService {
     }
 
     /// Install a NextDNS DoH profile.
-    /// If a removal password is set, installs as a .mobileconfig via Safari so
-    /// the child must enter the password to remove it.
-    /// Otherwise uses NEDNSSettingsManager (silent, no removal password).
-    func enableForcedDNS(profileID: String, removalPassword: String = "") async {
+    ///
+    /// Always installs as a .mobileconfig via Safari so the profile carries
+    /// PayloadRemovalDisallowed=true (a no-op on consumer devices, an absolute
+    /// block on supervised devices) and — when a removal password is set —
+    /// RemovalPassword, which iOS itself enforces at removal time.
+    ///
+    /// On a consumer iPhone the only ways past the password are: enter it in
+    /// Settings, or erase the entire device. There is no third path Apple
+    /// permits a third-party app to expose.
+    @discardableResult
+    func enableForcedDNS(profileID: String, removalPassword: String = "") async -> String? {
         UserDefaults.standard.set(profileID, forKey: "bsafe.dns.profileID")
-        if !removalPassword.isEmpty {
-            await MobileConfigService.shared.install(
-                profileID: profileID,
-                removalPassword: removalPassword)
-        } else {
-            let urlString = profileID.isEmpty
-                ? "https://dns.nextdns.io"
-                : "https://dns.nextdns.io/\(profileID)"
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                NEDNSSettingsManager.shared().loadFromPreferences { _ in
-                    let doh = NEDNSOverHTTPSSettings(servers: ["45.90.28.0", "45.90.30.0"])
-                    doh.serverURL = URL(string: urlString)
-                    NEDNSSettingsManager.shared().dnsSettings = doh
-                    NEDNSSettingsManager.shared().localizedDescription = "B-SAFE DNS Filter"
-                    NEDNSSettingsManager.shared().saveToPreferences { error in
-                        if let error { print("[B-SAFE] DNS save error: \(error)") }
-                        continuation.resume()
-                    }
-                }
-            }
-        }
+        UserDefaults.standard.set(true, forKey: "bsafe.dns.usingMobileConfig")
+        await MobileConfigService.shared.install(
+            profileID: profileID,
+            removalPassword: removalPassword)
+        return removalPassword.isEmpty
+            ? "DNS profile installed without a removal password — child can remove it from Settings without authentication."
+            : nil
     }
 
     /// Remove the B-SAFE DNS profile (restores device default DNS).
+    ///
+    /// Note: a configuration profile installed via .mobileconfig CANNOT be
+    /// removed from app code on a consumer device — iOS requires user action
+    /// in Settings (and the removal password). This call only:
+    ///   1. Clears the app-side "DNS is forced" flag.
+    ///   2. Best-effort removes any NEDNSSettingsManager profile from older
+    ///      installs that predated the mobileconfig path.
+    /// To fully turn it off, the admin must communicate the removal password
+    /// so the child can delete the profile in Settings.
     func disableForcedDNS() async {
+        UserDefaults.standard.set(false, forKey: "bsafe.dns.usingMobileConfig")
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             NEDNSSettingsManager.shared().loadFromPreferences { _ in
                 NEDNSSettingsManager.shared().removeFromPreferences { error in
@@ -130,47 +133,62 @@ class ContentBlockerService {
 
         switch config.websiteFilterMode {
         case .blacklist:
-            let domains = config.blockedWebsites.filter { !$0.isEmpty }
+            let domains = config.blockedWebsites.compactMap(DomainNormalizer.normalize)
             guard !domains.isEmpty else { return [] }
-            // One block rule per domain (catches all subdomains with "*" prefix)
-            return domains.map { domain in
-                Rule(
-                    action: Rule.Action(type: "block"),
-                    trigger: Rule.Trigger(
-                        urlFilter: ".*",
-                        ifDomain: ["*\(domain.hasPrefix("*.") ? String(domain.dropFirst(2)) : domain)"],
-                        unlessDomain: nil
-                    )
-                )
-            }
+            // One block rule per domain, matched via url-filter so any request
+            // to the domain or a subdomain is blocked (if-domain only filters by
+            // the *page* domain, not the request URL, so it can't block navigation
+            // to the domain itself — that was the prior bug).
+            return Array(Set(domains)).map { blockDomain($0) }
 
         case .whitelist:
-            let allowed = config.allowedWebsites.filter { !$0.isEmpty }
+            let allowed = config.allowedWebsites.compactMap(DomainNormalizer.normalize)
             guard !allowed.isEmpty else {
                 // No allowed list yet — block everything
                 return [blockAll()]
             }
-            // Block all, then un-block the allowed set
-            let prefixed = allowed.map { "*\($0.hasPrefix("*.") ? String($0.dropFirst(2)) : $0)" }
-            return [
-                blockAll(),
-                Rule(
-                    action: Rule.Action(type: "ignore-previous-rules"),
-                    trigger: Rule.Trigger(
-                        urlFilter: ".*",
-                        ifDomain: prefixed,
-                        unlessDomain: nil
-                    )
-                )
-            ]
+            // Block all http(s), then un-block each allowed domain (+ subdomains).
+            var rules: [Rule] = [blockAll()]
+            rules.append(contentsOf: Array(Set(allowed)).map { allowDomain($0) })
+            return rules
         }
     }
 
     private func blockAll() -> Rule {
         Rule(
             action: Rule.Action(type: "block"),
-            trigger: Rule.Trigger(urlFilter: ".*", ifDomain: nil, unlessDomain: nil)
+            trigger: Rule.Trigger(urlFilter: "^https?://", ifDomain: nil, unlessDomain: nil)
         )
+    }
+
+    private func blockDomain(_ domain: String) -> Rule {
+        Rule(
+            action: Rule.Action(type: "block"),
+            trigger: Rule.Trigger(
+                urlFilter: Self.urlFilterForDomain(domain),
+                ifDomain: nil,
+                unlessDomain: nil
+            )
+        )
+    }
+
+    private func allowDomain(_ domain: String) -> Rule {
+        Rule(
+            action: Rule.Action(type: "ignore-previous-rules"),
+            trigger: Rule.Trigger(
+                urlFilter: Self.urlFilterForDomain(domain),
+                ifDomain: nil,
+                unlessDomain: nil
+            )
+        )
+    }
+
+    /// Builds a WebKit-content-blocker url-filter regex that matches the
+    /// canonical domain and any subdomain. Example: "youtube.com" →
+    /// "^https?://([^/]+\\.)?youtube\\.com([/?#:]|$)"
+    private static func urlFilterForDomain(_ domain: String) -> String {
+        let escaped = domain.replacingOccurrences(of: ".", with: "\\.")
+        return "^https?://([^/]+\\.)?\(escaped)([/?#:]|$)"
     }
 
     // MARK: - File I/O

@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ScreenTimeConfiguration, UnlockRequest, WebsiteRequest, TamperAlert } from "@/lib/types";
+import { ScreenTimeConfiguration, UnlockRequest, WebsiteRequest, TamperAlert, AppRequest } from "@/lib/types";
 import {
   subscribeUnlockRequests,
   subscribeWebsiteRequests,
   subscribeTamperAlerts,
+  subscribeAppRequests,
   deleteUnlockRequest,
   deleteWebsiteRequest,
+  deleteAppRequest,
   dismissTamperAlert,
+  approveAppRequest,
   saveConfig,
   sendCommand,
 } from "@/lib/db";
@@ -27,15 +30,18 @@ export default function RequestsTab({
   const [unlocks, setUnlocks] = useState<{ pushKey: string; req: UnlockRequest }[]>([]);
   const [websites, setWebsites] = useState<{ pushKey: string; req: WebsiteRequest }[]>([]);
   const [alerts, setAlerts] = useState<{ pushKey: string; alert: TamperAlert }[]>([]);
+  const [appReqs, setAppReqs] = useState<{ pushKey: string; req: AppRequest }[]>([]);
 
   useEffect(() => {
     const u1 = subscribeUnlockRequests(uid, setUnlocks);
     const u2 = subscribeWebsiteRequests(uid, setWebsites);
     const u3 = subscribeTamperAlerts(uid, setAlerts);
+    const u4 = subscribeAppRequests(uid, setAppReqs);
     return () => {
       u1();
       u2();
       u3();
+      u4();
     };
   }, [uid]);
 
@@ -98,6 +104,48 @@ export default function RequestsTab({
               </button>
               <button
                 onClick={() => deleteWebsiteRequest(uid, pushKey)}
+                className="rounded-md border border-gray-300 px-3 py-1 text-xs hover:bg-gray-100"
+              >
+                Deny
+              </button>
+            </div>
+          </Card>
+        ))}
+      </Section>
+
+      <Section title={`App Requests (${appReqs.length})`}>
+        {appReqs.length === 0 && <p className="text-sm text-gray-400">No pending requests</p>}
+        {appReqs.map(({ pushKey, req }) => (
+          <Card key={pushKey}>
+            <div className="flex items-start gap-3">
+              {req.iconURL && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={req.iconURL}
+                  alt=""
+                  className="h-11 w-11 rounded-lg object-cover"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{req.appName}</div>
+                {req.sellerName && (
+                  <div className="truncate text-xs text-gray-500">{req.sellerName}</div>
+                )}
+                <div className="mt-1 text-xs text-gray-400">{req.deviceName}</div>
+                {req.reason && (
+                  <div className="mt-1 text-xs italic text-gray-600">&ldquo;{req.reason}&rdquo;</div>
+                )}
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => approveAppRequest(uid, pushKey, req)}
+                className="rounded-md bg-purple-600 px-3 py-1 text-xs font-semibold text-white hover:bg-purple-700"
+              >
+                Approve & Push
+              </button>
+              <button
+                onClick={() => deleteAppRequest(uid, pushKey)}
                 className="rounded-md border border-gray-300 px-3 py-1 text-xs hover:bg-gray-100"
               >
                 Deny

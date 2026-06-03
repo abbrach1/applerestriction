@@ -122,9 +122,28 @@ class ContentFilterProvider: NEFilterDataProvider {
 
     private func loadRules() {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
-        blockedDomains  = Set(defaults.stringArray(forKey: "bsafe.filter.blockedDomains") ?? [])
-        allowedDomains  = Set(defaults.stringArray(forKey: "bsafe.filter.allowedDomains") ?? [])
+        let raw = { (key: String) -> [String] in
+            defaults.stringArray(forKey: key) ?? []
+        }
+        blockedDomains  = Set(raw("bsafe.filter.blockedDomains").compactMap(Self.normalize))
+        allowedDomains  = Set(raw("bsafe.filter.allowedDomains").compactMap(Self.normalize))
         isWhitelistMode = defaults.bool(forKey: "bsafe.filter.whitelist")
         isLocked        = defaults.bool(forKey: "bsafe.filter.locked")
+    }
+
+    /// Mirrors DomainNormalizer in the main app target. Kept inline because
+    /// this extension target does not link against the app's source files.
+    private static func normalize(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !s.isEmpty else { return nil }
+        if let r = s.range(of: "://") { s = String(s[r.upperBound...]) }
+        while s.hasPrefix("*.") { s = String(s.dropFirst(2)) }
+        if s.hasPrefix("*") { s = String(s.dropFirst()) }
+        if s.hasPrefix("www.") { s = String(s.dropFirst(4)) }
+        for sep in ["/", "?", "#", ":"] {
+            if let idx = s.firstIndex(of: Character(sep)) { s = String(s[..<idx]) }
+        }
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return s.isEmpty ? nil : s
     }
 }

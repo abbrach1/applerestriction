@@ -1,6 +1,6 @@
 import { ref, get, set, update, onValue, off, remove, push, DataSnapshot } from "firebase/database";
 import { db } from "./firebase";
-import { ManagedUser, ScreenTimeConfiguration, defaultConfig, TamperAlert, UnlockRequest, WebsiteRequest, RecommendedApp } from "./types";
+import { ManagedUser, ScreenTimeConfiguration, defaultConfig, TamperAlert, UnlockRequest, WebsiteRequest, RecommendedApp, AppRequest, InstalledApp } from "./types";
 
 export async function loadUsers(): Promise<ManagedUser[]> {
   const snap = await get(ref(db, "users"));
@@ -15,24 +15,48 @@ export async function loadUsers(): Promise<ManagedUser[]> {
         displayName: info.displayName || "",
         deviceName: info.deviceName || "Unknown Device",
         isOnline: !!info.isOnline,
-        lastSeen: info.lastSeen || "",
+        lastSeen: Number(info.lastSeen) || 0,
       });
     }
     return false;
   });
   return out.sort((a, b) => {
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-    return (b.lastSeen || "").localeCompare(a.lastSeen || "");
+    // Most-recently-seen first; lastSeen is Unix ms.
+    return (b.lastSeen || 0) - (a.lastSeen || 0);
   });
 }
 
 export async function loadConfig(uid: string): Promise<ScreenTimeConfiguration> {
-  const snap = await get(ref(db, `users/${uid}/config`));
+  const snap = await get(ref(db, `users/${uid}/settings`));
   return { ...defaultConfig, ...(snap.val() || {}) } as ScreenTimeConfiguration;
 }
 
 export async function saveConfig(uid: string, config: ScreenTimeConfiguration): Promise<void> {
-  await set(ref(db, `users/${uid}/config`), { ...config, lastUpdated: Date.now() });
+  // Safety fields are owned by the NextDNS profile, not Firebase — strip them
+  // on write so applyParentalControl is the only path that changes them and
+  // both clients always read fresh state from NextDNS instead of a stale cache.
+  const forFirebase: ScreenTimeConfiguration = {
+    ...config,
+    safeSearchEnabled:        false,
+    youtubeRestrictedEnabled: false,
+    blockedDNSServices:       [],
+    blockedDNSCategories:     [],
+    lastUpdated: Date.now(),
+  };
+  await set(ref(db, `users/${uid}/settings`), forFirebase);
+}
+
+/// Real-time subscription to the config node. The iOS app already does this —
+/// without it the web shows a snapshot taken at page load and never sees
+/// changes the iOS admin (or another tab) makes.
+export function subscribeConfig(uid: string, cb: (config: ScreenTimeConfiguration) => void) {
+  const r = ref(db, `users/${uid}/settings`);
+  const handler = (snap: DataSnapshot) => {
+    cb({ ...defaultConfig, ...(snap.val() || {}) } as ScreenTimeConfiguration);
+  };
+  onValue(r, handler);
+  return () => off(r, "value", handler);
 }
 
 export async function sendCommand(uid: string, type: string, payload: Record<string, string> = {}) {
@@ -122,6 +146,63 @@ export function subscribePendingApps(
 
 export async function removePendingApp(uid: string, pushKey: string) {
   await remove(ref(db, `users/${uid}/pendingApps/${pushKey}`));
+}
+
+// MARK: - App Requests (child → admin)
+
+export function subscribeAppRequests(
+  uid: string,
+  cb: (items: { pushKey: string; req: AppRequest }[]) => void,
+) {
+  const r = ref(db, `users/${uid}/appRequests`);
+  const handler = (snap: DataSnapshot) => {
+    const items: { pushKey: string; req: AppRequest }[] = [];
+    snap.forEach((c) => {
+      items.push({ pushKey: c.key!, req: c.val() as AppRequest });
+      return false;
+    });
+    cb(items.reverse());
+  };
+  onValue(r, handler);
+  return () => off(r, "value", handler);
+}
+
+export async function deleteAppRequest(uid: string, pushKey: string) {
+  await remove(ref(db, `users/${uid}/appRequests/${pushKey}`));
+}
+
+/// Approve a child's app request: push it onto pendingApps (the existing
+/// SKOverlay-installable list, which works even with App Store access blocked)
+/// and delete the original request.
+// MARK: - Installed App Library (child labels their apps for the admin)
+
+export function subscribeInstalledApps(
+  uid: string,
+  cb: (items: { pushKey: string; app: InstalledApp }[]) => void,
+) {
+  const r = ref(db, `users/${uid}/installedApps`);
+  const handler = (snap: DataSnapshot) => {
+    const items: { pushKey: string; app: InstalledApp }[] = [];
+    snap.forEach((c) => {
+      items.push({ pushKey: c.key!, app: c.val() as InstalledApp });
+      return false;
+    });
+    items.sort((a, b) => (a.app.name || "").toLowerCase().localeCompare((b.app.name || "").toLowerCase()));
+    cb(items);
+  };
+  onValue(r, handler);
+  return () => off(r, "value", handler);
+}
+
+export async function approveAppRequest(uid: string, pushKey: string, req: AppRequest) {
+  await pushRecommendedApp(uid, {
+    appStoreID: req.appStoreID,
+    appName:    req.appName,
+    iconURL:    req.iconURL,
+    category:   req.category,
+    sellerName: req.sellerName,
+  });
+  await remove(ref(db, `users/${uid}/appRequests/${pushKey}`));
 }
 
 export async function loadAppListReport(uid: string): Promise<{

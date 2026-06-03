@@ -19,6 +19,8 @@
 		A10040 /* ContentBlockerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10040 /* ContentBlockerService.swift */; };
 		A10008 /* MockScreenTimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008 /* MockScreenTimeManager.swift */; };
 		A10009 /* SharedDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10009 /* SharedDefaults.swift */; };
+		A10070 /* DomainNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10070 /* DomainNormalizer.swift */; };
+		A10080 /* CaptivePortalDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10080 /* CaptivePortalDetector.swift */; };
 		A10010 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10010 /* Constants.swift */; };
 		A10011 /* AuthorizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10011 /* AuthorizationView.swift */; };
 		A10012 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012 /* MainTabView.swift */; };
@@ -74,6 +76,8 @@
 		B10041 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		B10051 /* NextDNSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextDNSService.swift; sourceTree = "<group>"; };
 		B10009 /* SharedDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedDefaults.swift; sourceTree = "<group>"; };
+		B10070 /* DomainNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainNormalizer.swift; sourceTree = "<group>"; };
+		B10080 /* CaptivePortalDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptivePortalDetector.swift; sourceTree = "<group>"; };
 		B10010 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		B10011 /* AuthorizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationView.swift; sourceTree = "<group>"; };
 		B10012 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
@@ -201,6 +205,7 @@
 				B10040 /* ContentBlockerService.swift */,
 				B10051 /* NextDNSService.swift */,
 				B10060 /* ContentFilterService.swift */,
+				B10080 /* CaptivePortalDetector.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -260,6 +265,7 @@
 			children = (
 				B10009 /* SharedDefaults.swift */,
 				B10010 /* Constants.swift */,
+				B10070 /* DomainNormalizer.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -443,6 +449,8 @@
 				A10008 /* MockScreenTimeManager.swift in Sources */,
 				A10009 /* SharedDefaults.swift in Sources */,
 				A10010 /* Constants.swift in Sources */,
+				A10070 /* DomainNormalizer.swift in Sources */,
+				A10080 /* CaptivePortalDetector.swift in Sources */,
 				A10011 /* AuthorizationView.swift in Sources */,
 				A10012 /* MainTabView.swift in Sources */,
 				A10013 /* DashboardView.swift in Sources */,

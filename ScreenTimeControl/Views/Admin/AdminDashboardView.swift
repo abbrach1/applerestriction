@@ -60,8 +60,10 @@ class AdminUserViewModel: ObservableObject {
     @Published var tamperAlerts: [(pushKey: String, alert: TamperAlert)] = []
     @Published var unlockRequests: [(pushKey: String, request: UnlockRequest)] = []
     @Published var websiteRequests: [(pushKey: String, request: WebsiteRequest)] = []
+    @Published var appRequests:     [(pushKey: String, request: AppRequest)]     = []
+    @Published var installedApps:   [(pushKey: String, app: InstalledApp)]       = []
 
-    var pendingRequestCount: Int { unlockRequests.count + websiteRequests.count }
+    var pendingRequestCount: Int { unlockRequests.count + websiteRequests.count + appRequests.count }
 
     struct WebsiteSetupInfo {
         let siteCount: Int
@@ -164,6 +166,8 @@ class AdminUserViewModel: ObservableObject {
             group.addTask { await self.loadTamperAlerts(uid: uid, idToken: idToken) }
             group.addTask { await self.loadUnlockRequests(uid: uid, idToken: idToken) }
             group.addTask { await self.loadWebsiteRequests(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadAppRequests(uid: uid, idToken: idToken) }
+            group.addTask { await self.loadInstalledApps(uid: uid, idToken: idToken) }
         }
 
         isLoading = false
@@ -325,6 +329,89 @@ class AdminUserViewModel: ObservableObject {
                              body: "Your admin denied access to the requested website.")
     }
 
+    // MARK: - App Requests
+
+    func loadAppRequests(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/appRequests.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            appRequests = []
+            return
+        }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .millisecondsSince1970
+        var results: [(pushKey: String, request: AppRequest)] = []
+        for (key, val) in dict {
+            if let d = try? JSONSerialization.data(withJSONObject: val),
+               let req = try? dec.decode(AppRequest.self, from: d) {
+                results.append((pushKey: key, request: req))
+            }
+        }
+        appRequests = results.sorted { $0.request.timestamp > $1.request.timestamp }
+    }
+
+    /// Approve a child's app request: push it onto pendingApps (the existing
+    /// SKOverlay-installable list — which works without the App Store being
+    /// unblocked because SKOverlay talks to StoreKit, not the App Store app)
+    /// and delete the original request.
+    func approveAppRequest(pushKey: String, request: AppRequest, uid: String, idToken: String) async {
+        let app = RecommendedApp(
+            appStoreID: request.appStoreID,
+            appName:    request.appName,
+            iconURL:    request.iconURL,
+            category:   request.category,
+            sellerName: request.sellerName,
+            timestamp:  Date()
+        )
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
+        if let encoded = try? encoder.encode(app),
+           let pushURL = URL(string: "\(dbURL)/users/\(uid)/pendingApps.json?auth=\(idToken)") {
+            var pushReq = URLRequest(url: pushURL)
+            pushReq.httpMethod = "POST"
+            pushReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            pushReq.httpBody = encoded
+            _ = try? await URLSession.shared.data(for: pushReq)
+        }
+        // Delete the request
+        if let delURL = URL(string: "\(dbURL)/users/\(uid)/appRequests/\(pushKey).json?auth=\(idToken)") {
+            var delReq = URLRequest(url: delURL); delReq.httpMethod = "DELETE"
+            _ = try? await URLSession.shared.data(for: delReq)
+        }
+        appRequests.removeAll { $0.pushKey == pushKey }
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "✅ App Approved",
+                             body: "Your admin approved \(request.appName). Tap GET on your B-SAFE home to install.")
+    }
+
+    // MARK: - Installed Apps Library
+
+    func loadInstalledApps(uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/installedApps.json?auth=\(idToken)") else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            installedApps = []
+            return
+        }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .millisecondsSince1970
+        var results: [(pushKey: String, app: InstalledApp)] = []
+        for (key, val) in dict {
+            if let d = try? JSONSerialization.data(withJSONObject: val),
+               let app = try? dec.decode(InstalledApp.self, from: d) {
+                results.append((pushKey: key, app: app))
+            }
+        }
+        installedApps = results.sorted { $0.app.name.lowercased() < $1.app.name.lowercased() }
+    }
+
+    func denyAppRequest(pushKey: String, request: AppRequest, uid: String, idToken: String) async {
+        guard let url = URL(string: "\(dbURL)/users/\(uid)/appRequests/\(pushKey).json?auth=\(idToken)") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "DELETE"
+        _ = try? await URLSession.shared.data(for: req)
+        appRequests.removeAll { $0.pushKey == pushKey }
+        await sendFCMToChild(uid: uid, idToken: idToken,
+                             title: "❌ App Denied",
+                             body: "Your admin denied your request to install \(request.appName).")
+    }
+
     /// Queues a notification for the child device at /users/{uid}/notifications/{autoId}.
     /// The child's background sync task reads this node and fires a local UNNotification,
     /// then deletes the entry. No Firebase Messaging SDK required.
@@ -372,7 +459,17 @@ class AdminUserViewModel: ObservableObject {
         isSaving = true
         lastError = nil
 
-        guard let encoded = try? encoder.encode(config),
+        // Safety fields (safeSearch, YouTube Restricted, blocked services/categories)
+        // are owned by the NextDNS profile — they live there, not in Firebase.
+        // Strip them on write so the only path that changes them is `applyParentalControl`,
+        // and both clients always read fresh state from NextDNS instead of a stale cache.
+        var firebaseConfig = config
+        firebaseConfig.safeSearchEnabled        = false
+        firebaseConfig.youtubeRestrictedEnabled = false
+        firebaseConfig.blockedDNSServices       = []
+        firebaseConfig.blockedDNSCategories     = []
+
+        guard let encoded = try? encoder.encode(firebaseConfig),
               let url = URL(string: "\(dbURL)/users/\(uid)/settings.json?auth=\(idToken)") else {
             lastError = "Failed to encode settings"
             isSaving = false; return
@@ -423,6 +520,9 @@ struct AdminDashboardView: View {
     @State private var showFCMSettings = false
     @State private var fcmServerKey = ""
     @State private var fcmSaved = false
+    @State private var showAddUser = false
+    @State private var editingUser: ManagedUser? = nil
+    @State private var userOpResult: String? = nil
     @State private var nextDNSApiKey = ""
     @State private var nextDNSSaved = false
     @State private var alertEmail = ""
@@ -489,6 +589,9 @@ struct AdminDashboardView: View {
                                     .font(.caption).fontWeight(.medium).foregroundStyle(.green)
                             }
                         }
+                        Button {
+                            showAddUser = true
+                        } label: { Image(systemName: "person.crop.circle.badge.plus") }
                         Button {
                             Task {
                                 let token = await auth.freshToken() ?? ""
@@ -629,6 +732,52 @@ struct AdminDashboardView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showAddUser) {
+                AddUserSheet(
+                    onCreated: { email in
+                        showAddUser = false
+                        userOpResult = "Created \(email)."
+                        Task {
+                            let token = await auth.freshToken() ?? ""
+                            await vm.loadUsers(idToken: token)
+                        }
+                    },
+                    onCancel: { showAddUser = false }
+                )
+                .environmentObject(auth)
+            }
+            .sheet(item: $editingUser) { user in
+                EditUserSheet(
+                    user: user,
+                    onSaved: {
+                        editingUser = nil
+                        userOpResult = "Updated profile."
+                        Task {
+                            let token = await auth.freshToken() ?? ""
+                            await vm.loadUsers(idToken: token)
+                        }
+                    },
+                    onPasswordReset: {
+                        userOpResult = "Password reset email sent to \(user.email)."
+                    },
+                    onCancel: { editingUser = nil }
+                )
+                .environmentObject(auth)
+            }
+            .overlay(alignment: .bottom) {
+                if let userOpResult {
+                    Text(userOpResult)
+                        .font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Color.black.opacity(0.8))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 20)
+                        .task {
+                            try? await Task.sleep(nanoseconds: 3_500_000_000)
+                            self.userOpResult = nil
+                        }
+                }
+            }
             .task {
                 // Load keys from UserDefaults first (instant, no network)
                 if let local = UserDefaults.standard.string(forKey: "bsafe.fcmServerKey"), !local.isEmpty {
@@ -753,6 +902,12 @@ struct AdminDashboardView: View {
                             } label: {
                                 Label("Remove", systemImage: "trash")
                             }
+                            Button {
+                                editingUser = user
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
                         }
                     }
                 }
@@ -1119,13 +1274,13 @@ struct RequestsTab: View {
     @EnvironmentObject var auth: FirebaseAuthService
 
     var body: some View {
-        if vm.unlockRequests.isEmpty && vm.websiteRequests.isEmpty {
+        if vm.unlockRequests.isEmpty && vm.websiteRequests.isEmpty && vm.appRequests.isEmpty {
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 52)).foregroundStyle(.green)
                 Text("No Pending Requests")
                     .font(.headline)
-                Text("Unlock and website access requests from this device appear here.")
+                Text("Unlock, website, and app requests from this device appear here.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 32)
             }
@@ -1182,8 +1337,65 @@ struct RequestsTab: View {
                     } header: { Label("Website Requests", systemImage: "globe.badge.exclamationmark") }
                       footer: { Text("Approve adds the site to their whitelist and enables whitelist mode.") }
                 }
+
+                if !vm.appRequests.isEmpty {
+                    Section {
+                        ForEach(vm.appRequests, id: \.pushKey) { item in
+                            appRequestCard(item: item)
+                        }
+                    } header: { Label("App Requests", systemImage: "arrow.down.app") }
+                      footer: { Text("Approve pushes the app to their B-SAFE home where they tap GET to install. Works even with the App Store blocked.") }
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private func appRequestCard(item: (pushKey: String, request: AppRequest)) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                AsyncImage(url: URL(string: item.request.iconURL)) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.2))
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.request.appName).font(.subheadline).fontWeight(.semibold).lineLimit(1)
+                    Text("\(item.request.deviceName.isEmpty ? "Unknown" : item.request.deviceName) · \(item.request.timestamp.formatted(.relative(presentation: .named)))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if !item.request.reason.isEmpty {
+                Text("\"\(item.request.reason)\"")
+                    .font(.caption).foregroundStyle(.secondary).italic()
+                    .padding(.leading, 54)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        let token = await auth.freshToken() ?? ""
+                        await vm.denyAppRequest(pushKey: item.pushKey, request: item.request, uid: user.uid, idToken: token)
+                    }
+                } label: {
+                    Text("Deny").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered).tint(.red)
+
+                Button {
+                    Task {
+                        let token = await auth.freshToken() ?? ""
+                        await vm.approveAppRequest(pushKey: item.pushKey, request: item.request, uid: user.uid, idToken: token)
+                    }
+                } label: {
+                    Text("Approve").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.purple)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder
@@ -1800,6 +2012,16 @@ struct AppsTab: View {
     @State private var pushingAppID: String?   // appStoreID currently being sent
     @FocusState private var searchFocused: Bool
 
+    // Per-app time limits
+    @State private var showingLimitSheet = false
+    #if !targetEnvironment(simulator)
+    @State private var newLimitSelection = FamilyActivitySelection()
+    #endif
+    @State private var newLimitMinutes = 60
+    @State private var newLimitName = ""
+    @State private var newLimitMode = 0   // 0 = on-device picker, 1 = child's labeled library
+    @State private var newLimitLibraryKey: String? = nil
+
     private let dbURL = "https://applerestrictions-default-rtdb.firebaseio.com"
 
     var body: some View {
@@ -1984,6 +2206,58 @@ struct AppsTab: View {
                 Text("All apps are allowed by default. Selected apps will show a blocking screen on the device. Note: this picker shows your device's apps — use the child-side Admin Setup to pick from the child's installed apps.")
             }
 
+            // Daily time limits
+            Section {
+                if vm.config.appTimeLimits.isEmpty {
+                    Text("No daily limits set. Add one to cap how long the child can use specific apps per day.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(vm.config.appTimeLimits.indices, id: \.self) { idx in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(vm.config.appTimeLimits[idx].displayName)
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("\(vm.config.appTimeLimits[idx].timeLimitMinutes) min/day")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    vm.config.appTimeLimits.remove(at: idx)
+                                } label: {
+                                    Image(systemName: "trash").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            Stepper(
+                                value: Binding(
+                                    get: { vm.config.appTimeLimits[idx].timeLimitMinutes },
+                                    set: { vm.config.appTimeLimits[idx].timeLimitMinutes = $0 }
+                                ),
+                                in: 5...720, step: 5
+                            ) {
+                                Text("\(vm.config.appTimeLimits[idx].timeLimitMinutes) min").font(.caption2)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                Button {
+                    #if !targetEnvironment(simulator)
+                    newLimitSelection = FamilyActivitySelection()
+                    #endif
+                    newLimitMinutes = 60
+                    newLimitName = ""
+                    showingLimitSheet = true
+                } label: {
+                    Label("Add Time Limit", systemImage: "timer")
+                }
+            } header: {
+                Text("Daily Time Limits")
+            } footer: {
+                Text("Each limit covers a group of apps that share a daily budget. When the budget runs out, the apps shield until midnight.")
+            }
+
             Section {
                 ApplyButton(label: "Apply App Settings",
                             icon: "checkmark.shield.fill",
@@ -2023,6 +2297,117 @@ struct AppsTab: View {
                     }
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { showingPicker = false }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingLimitSheet) {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    Picker("Mode", selection: $newLimitMode) {
+                        Text("On-Device Picker").tag(0)
+                        Text("Child's Library (\(vm.installedApps.count))").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal).padding(.top, 8)
+
+                    if newLimitMode == 0 {
+                        Text("Pick the apps that share one daily budget, then set the minutes.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal).padding(.vertical, 8)
+
+                        FamilyActivityPicker(selection: $newLimitSelection)
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        if vm.installedApps.isEmpty {
+                            VStack(spacing: 10) {
+                                Image(systemName: "square.grid.3x3").font(.system(size: 36)).foregroundStyle(.secondary)
+                                Text("This device hasn't submitted its app library yet.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center).padding(.horizontal, 24)
+                                Text("Ask them to open B-SAFE → My Apps and pick the apps they have.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center).padding(.horizontal, 24)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            List(vm.installedApps, id: \.pushKey, selection: $newLimitLibraryKey) { item in
+                                HStack {
+                                    Text(item.app.name.isEmpty ? "(unnamed)" : item.app.name)
+                                    if item.app.isCategory {
+                                        Text("category").font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if newLimitLibraryKey == item.pushKey {
+                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture { newLimitLibraryKey = item.pushKey }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(spacing: 10) {
+                        if newLimitMode == 0 {
+                            TextField("Group name (e.g. Social Media)", text: $newLimitName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        Stepper(value: $newLimitMinutes, in: 5...720, step: 5) {
+                            Text("\(newLimitMinutes) minutes per day")
+                                .font(.subheadline).fontWeight(.medium)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                }
+                .navigationTitle("New Time Limit")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showingLimitSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Add") {
+                            if newLimitMode == 0 {
+                                let appCount = newLimitSelection.applicationTokens.count
+                                let catCount = newLimitSelection.categoryTokens.count
+                                let webCount = newLimitSelection.webDomainTokens.count
+                                let total = appCount + catCount + webCount
+                                guard total > 0,
+                                      let data = try? JSONEncoder().encode(newLimitSelection) else { return }
+                                let name = newLimitName.trimmingCharacters(in: .whitespaces)
+                                let displayName = name.isEmpty
+                                    ? (total == 1 ? "1 app" : "\(total) apps")
+                                    : name
+                                vm.config.appTimeLimits.append(AppTimeLimit(
+                                    selectionData: data.base64EncodedString(),
+                                    displayName: displayName,
+                                    timeLimitMinutes: newLimitMinutes,
+                                    isCategory: catCount > 0
+                                ))
+                            } else {
+                                guard let key = newLimitLibraryKey,
+                                      let entry = vm.installedApps.first(where: { $0.pushKey == key }) else { return }
+                                vm.config.appTimeLimits.append(AppTimeLimit(
+                                    selectionData: entry.app.selectionData,
+                                    displayName: entry.app.name,
+                                    timeLimitMinutes: newLimitMinutes,
+                                    isCategory: entry.app.isCategory
+                                ))
+                            }
+                            showingLimitSheet = false
+                            newLimitLibraryKey = nil
+                        }
+                        .disabled(
+                            newLimitMode == 0
+                                ? (newLimitSelection.applicationTokens.isEmpty
+                                   && newLimitSelection.categoryTokens.isEmpty
+                                   && newLimitSelection.webDomainTokens.isEmpty)
+                                : (newLimitLibraryKey == nil)
+                        )
                     }
                 }
             }
@@ -2454,6 +2839,7 @@ struct DNSTab: View {
     @State private var logFilter = ""
     @State private var isSavingSafety = false
     @State private var safetySaved = false
+    @State private var safetyError: String? = nil
     @State private var autoRefreshTimer: Timer? = nil
 
     private var profileID: String { vm.config.nextDNSProfileID }
@@ -2784,7 +3170,7 @@ struct DNSTab: View {
 
             Section {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(PCItem.knownServices) { item in
+                    ForEach(mergedPCItems(known: PCItem.knownServices, active: vm.config.blockedDNSServices)) { item in
                         BlockChip(item: item, isBlocked: vm.config.blockedDNSServices.contains(item.id)) {
                             toggleDNSService(item.id)
                         }
@@ -2796,7 +3182,7 @@ struct DNSTab: View {
 
             Section {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(PCItem.knownCategories) { item in
+                    ForEach(mergedPCItems(known: PCItem.knownCategories, active: vm.config.blockedDNSCategories)) { item in
                         BlockChip(item: item, isBlocked: vm.config.blockedDNSCategories.contains(item.id)) {
                             toggleDNSCategory(item.id)
                         }
@@ -2810,9 +3196,10 @@ struct DNSTab: View {
                 Button {
                     Task {
                         isSavingSafety = true
+                        safetyError = nil
                         let token = await auth.freshToken() ?? ""
                         await vm.saveAndSendCommand(.updateWebsites, uid: user.uid, idToken: token, section: "websites")
-                        await NextDNSService.shared.applyParentalControl(
+                        let err = await NextDNSService.shared.applyParentalControl(
                             profileID: profileID,
                             apiKey: effectiveApiKey,
                             safeSearch: vm.config.safeSearchEnabled,
@@ -2821,9 +3208,13 @@ struct DNSTab: View {
                             blockedCategories: vm.config.blockedDNSCategories
                         )
                         isSavingSafety = false
-                        safetySaved = true
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        safetySaved = false
+                        if let err {
+                            safetyError = err
+                        } else {
+                            safetySaved = true
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            safetySaved = false
+                        }
                     }
                 } label: {
                     HStack {
@@ -2841,6 +3232,16 @@ struct DNSTab: View {
                 .disabled(isSavingSafety || !isConfigured)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
+
+                if let safetyError {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        Text(safetyError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    .listRowBackground(Color.red.opacity(0.05))
+                }
             } footer: {
                 Text("Updates your NextDNS profile immediately. All devices using this profile are affected.")
             }
@@ -2861,6 +3262,26 @@ struct DNSTab: View {
         } else {
             vm.config.blockedDNSCategories.append(id)
         }
+    }
+
+    /// NextDNS supports many more services/categories than `PCItem.knownServices/Categories`
+    /// has chips for. Always include items the admin already has blocked on NextDNS
+    /// (typically toggled via NextDNS's own dashboard) so the iOS UI reflects reality
+    /// instead of silently omitting them.
+    private func mergedPCItems(known: [PCItem], active: [String]) -> [PCItem] {
+        var seen = Set(known.map { $0.id })
+        var out = known
+        for id in active where !seen.contains(id) {
+            out.append(PCItem(id: id, label: prettyLabel(id), icon: "app.badge"))
+            seen.insert(id)
+        }
+        return out
+    }
+
+    private func prettyLabel(_ id: String) -> String {
+        id.split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 }
 
@@ -3014,4 +3435,177 @@ struct ManagedUser: Identifiable {
 
     var primaryLabel: String { displayName.isEmpty ? email : displayName }
     var secondaryLabel: String { displayName.isEmpty ? deviceName : email }
+}
+
+// MARK: - User Management Sheets
+
+struct AddUserSheet: View {
+    let onCreated: (String) -> Void
+    let onCancel: () -> Void
+    @EnvironmentObject var auth: FirebaseAuthService
+
+    @State private var email = ""
+    @State private var password = ""
+    @State private var displayName = ""
+    @State private var deviceName = ""
+    @State private var submitting = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("child@example.com", text: $email)
+                        .keyboardType(.emailAddress)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    SecureField("Password (min 6 chars)", text: $password)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                } header: { Text("Sign-in Credentials") }
+                  footer: { Text("Save the password — you'll give it to the child when they sign in on their device.") }
+
+                Section {
+                    TextField("Sarah", text: $displayName)
+                    TextField("Sarah's iPhone (optional)", text: $deviceName)
+                } header: { Text("Profile") }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Add Child User")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if submitting { ProgressView() } else { Text("Create") }
+                    }
+                    .disabled(submitting || email.isEmpty || password.count < 6)
+                }
+            }
+        }
+    }
+
+    private func submit() async {
+        submitting = true
+        errorMessage = nil
+        do {
+            _ = try await auth.createManagedUser(
+                email: email,
+                password: password,
+                displayName: displayName,
+                deviceName: deviceName
+            )
+            onCreated(email)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        submitting = false
+    }
+}
+
+struct EditUserSheet: View {
+    let user: ManagedUser
+    let onSaved: () -> Void
+    let onPasswordReset: () -> Void
+    let onCancel: () -> Void
+    @EnvironmentObject var auth: FirebaseAuthService
+
+    @State private var displayName: String
+    @State private var deviceName: String
+    @State private var saving = false
+    @State private var resetting = false
+    @State private var errorMessage: String?
+
+    init(user: ManagedUser, onSaved: @escaping () -> Void, onPasswordReset: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.user = user
+        self.onSaved = onSaved
+        self.onPasswordReset = onPasswordReset
+        self.onCancel = onCancel
+        _displayName = State(initialValue: user.displayName)
+        _deviceName  = State(initialValue: user.deviceName)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack { Text("Email"); Spacer(); Text(user.email).foregroundStyle(.secondary) }
+                } footer: {
+                    Text("Email can't be changed from here. Create a new account if needed.")
+                }
+                Section {
+                    TextField("Display name", text: $displayName)
+                    TextField("Device name", text: $deviceName)
+                } header: { Text("Profile") }
+
+                Section {
+                    Button {
+                        Task { await resetPassword() }
+                    } label: {
+                        HStack {
+                            if resetting { ProgressView() } else { Image(systemName: "envelope") }
+                            Text("Send Password Reset Email")
+                        }
+                    }
+                    .disabled(resetting)
+                } footer: {
+                    Text("Firebase will email \(user.email) a link to set a new password. Direct password change requires a server-side admin and isn't available from the app.")
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Edit User")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if saving { ProgressView() } else { Text("Save") }
+                    }
+                    .disabled(saving)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        saving = true
+        errorMessage = nil
+        do {
+            try await auth.updateManagedUser(uid: user.uid, displayName: displayName, deviceName: deviceName)
+            onSaved()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        saving = false
+    }
+
+    private func resetPassword() async {
+        resetting = true
+        errorMessage = nil
+        do {
+            try await auth.sendPasswordReset(email: user.email)
+            onPasswordReset()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        resetting = false
+    }
 }

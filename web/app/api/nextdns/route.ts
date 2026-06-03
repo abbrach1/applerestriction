@@ -13,15 +13,32 @@ async function proxy(req: NextRequest) {
   if (ct) headers["Content-Type"] = ct;
 
   const init: RequestInit = { method: req.method, headers };
+  let bodyForLog = "";
   if (req.method !== "GET" && req.method !== "DELETE") {
-    init.body = await req.text();
+    bodyForLog = await req.text();
+    init.body = bodyForLog;
   }
-  const res = await fetch(`${BASE}/${path}`, init);
-  const text = await res.text();
-  return new NextResponse(text, {
-    status: res.status,
-    headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
-  });
+  try {
+    const res = await fetch(`${BASE}/${path}`, init);
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(`[nextdns-proxy] ${req.method} ${path} → ${res.status}`);
+      if (bodyForLog) console.error(`  body sent: ${bodyForLog}`);
+      console.error(`  upstream replied: ${text || "(empty body)"}`);
+    }
+    // The Response constructor forbids a body on null-body statuses
+    // (204/205/304). NextDNS returns 204 on successful PATCH/DELETE, so
+    // passing the empty string body would throw "Invalid response status code".
+    const nullBodyStatus = res.status === 204 || res.status === 205 || res.status === 304;
+    return new NextResponse(nullBodyStatus ? null : text, {
+      status: res.status,
+      headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[nextdns-proxy] fetch threw for ${req.method} ${path}: ${msg}`);
+    return NextResponse.json({ error: `proxy fetch failed: ${msg}` }, { status: 502 });
+  }
 }
 
 export const GET = proxy;
